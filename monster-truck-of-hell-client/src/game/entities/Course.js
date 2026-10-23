@@ -1,14 +1,15 @@
-// The race course over the lava: grey studded slabs with red/white curbs, sand ramps with teal sides,
-// lava gaps to jump, obstacles (tyre stacks, barrels, sliding pushers), the purple potions and the
-// checkered finish. Also builds the spawn plaza slab and its curbs.
+// The race course over the lava, as in the reference: sand slabs with teal sides (some of them
+// halfpipes with panelled banks), a light-blue checker stretch with maroon sides and a mint stretch with
+// magenta sides, dark seams along every slab, lava gaps to jump, speed pads, tall red walls, low rails,
+// sliding pushers, checkpoint flags, the purple potions and the checkered finish. Also builds the
+// spawn plaza slab and its curbs.
 
 import * as THREE from 'three';
-import { COURSE, WORLD, POTIONS, FINISH, segCorners } from '../../shared/gameData.js';
-import { studTexture, sandTexture, curbTexture, checkerTexture, glowTexture } from '../util/textures.js';
+import { COURSE, WORLD, POTIONS, FINISH, segCorners, segTop } from '../../shared/gameData.js';
+import { studTexture, sandTexture, curbTexture, checkerTexture, glowTexture, roadCheckerTexture, mintTexture, chevronTexture, speckleTexture, diamondTexture } from '../util/textures.js';
 import { plastic, neon } from '../util/materials.js';
 import { box, cylinder } from '../util/geometry.js';
 import { makeBillboard, FONT_TITLE } from '../util/canvasText.js';
-import { rng } from '../util/textures.js';
 
 const S = WORLD.stud;
 
@@ -45,6 +46,105 @@ export function slabGeometry(top, bottom, uvScale = S) {
   return g;
 }
 
+// A course segment as a solid slab: its top is a grid (along x across) following the slope, the lean
+// and the halfpipe walls, with side walls and end caps down to a flat bottom. Groups: 0 = top,
+// 1 = sides, 2 = halfpipe walls (the same as the top unless the segment has a bankStyle).
+// UVs: top in world units / 8 (x, z), sides along the edge / height.
+function topPoint(seg, c, t, u) {
+  const lx = c[0].x + (c[3].x - c[0].x) * t, lz = c[0].z + (c[3].z - c[0].z) * t;
+  const rx = c[1].x + (c[2].x - c[1].x) * t, rz = c[1].z + (c[2].z - c[1].z) * t;
+  return [lx + (rx - lx) * u, segTop(seg, t, (u - 0.5) * seg.w), lz + (rz - lz) * u];
+}
+function segGrid(seg) {
+  const c = segCorners(seg);
+  const nT = Math.max(1, Math.ceil(seg.len / (seg.bank ? 14 : 24)));
+  const nU = seg.bankFlat ? 4 : seg.bank ? 14 : seg.twist ? 2 : 1;
+  const P = [];
+  for (let i = 0; i <= nT; i++) {
+    const row = [];
+    for (let j = 0; j <= nU; j++) row.push(topPoint(seg, c, i / nT, j / nU));
+    P.push(row);
+  }
+  return { P, nT, nU };
+}
+
+export function roadGeometry(seg) {
+  const { P, nT, nU } = segGrid(seg);
+  const bottom = Math.min(...P.flat().map((p) => p[1])) - WORLD.slabDepth;
+  const pos = [], uv = [];
+  const quad = (a, b, cc, d, ua, ub, uc, ud) => {
+    pos.push(...a, ...cc, ...b, ...a, ...d, ...cc);
+    uv.push(...ua, ...uc, ...ub, ...ua, ...ud, ...uc);
+  };
+  const wuv = (p) => [p[0] / 8, -p[2] / 8];
+  // the flat floor is the middle half; the rest of a halfpipe is its walls
+  const onFloor = (j) => Math.abs((j / nU - 0.5) * seg.w) <= seg.w / 4 + 0.01;
+  const tops = (walls) => {
+    for (let i = 0; i < nT; i++) {
+      for (let j = 0; j < nU; j++) {
+        const isWall = !!seg.bank && !(onFloor(j) && onFloor(j + 1));
+        if (isWall !== walls) continue;
+        const a = P[i][j], b = P[i][j + 1], cc = P[i + 1][j + 1], d = P[i + 1][j];
+        quad(a, d, cc, b, wuv(a), wuv(d), wuv(cc), wuv(b));
+      }
+    }
+  };
+  tops(false);
+  const floorCount = pos.length / 3;
+  tops(true);
+  const topCount = pos.length / 3;
+  const down = (p) => [p[0], bottom, p[2]];
+  const wall = (line) => {
+    let acc = 0;
+    for (let k = 0; k < line.length - 1; k++) {
+      const a = line[k], b = line[k + 1];
+      const l = Math.hypot(b[0] - a[0], b[2] - a[2]) / 8;
+      quad(a, b, down(b), down(a), [acc, a[1] / 8], [acc + l, b[1] / 8], [acc + l, bottom / 8], [acc, bottom / 8]);
+      acc += l;
+    }
+  };
+  wall(P.map((row) => row[nU]));                    // right side, start to end
+  wall(P.map((row) => row[0]).reverse());           // left side, end to start
+  wall(P[0].slice());                               // start cap
+  wall(P[nT].slice().reverse());                    // end cap
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.addGroup(0, floorCount, 0);
+  g.addGroup(floorCount, topCount - floorCount, 2);
+  g.addGroup(topCount, pos.length / 3 - topCount, 1);
+  g.computeVertexNormals();
+  return g;
+}
+
+// the dark seams of the reference: the slab outline, the panel lines of the banks and the creases
+export function roadLines(seg) {
+  const { P, nT, nU } = segGrid(seg);
+  const pts = [];
+  const lift = (p) => [p[0], p[1] + 0.06, p[2]];
+  const seg2 = (a, b) => pts.push(...lift(a), ...lift(b));
+  for (let i = 0; i <= nT; i++) {
+    for (let j = 0; j < nU; j++) if (i === 0 || i === nT || (seg.bank && !seg.bankFlat) || seg.twist) seg2(P[i][j], P[i][j + 1]);
+  }
+  for (let j = 0; j <= nU; j++) {
+    for (let i = 0; i < nT; i++) seg2(P[i][j], P[i + 1][j]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return g;
+}
+
+// world-scaled road texture (UVs are world / 8; one texture repeat = 16 units)
+function roadMat(map, roughness) {
+  const m = map.clone();
+  m.needsUpdate = true;
+  m.repeat.set(0.5, 0.5);
+  return new THREE.MeshStandardMaterial({ map: m, roughness });
+}
+const lineMat = (color) => new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.8 });
+const sideMat = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
+const padMat = (lo, hi, mark) => new THREE.MeshBasicMaterial({ map: chevronTexture(lo, hi, mark), polygonOffset: true, polygonOffsetFactor: -2 });
+
 let mats = null;
 function materials() {
   if (mats) return mats;
@@ -60,6 +160,27 @@ function materials() {
     teal: new THREE.MeshStandardMaterial({ color: '#3f8f8c', roughness: 0.85 }),
     curb: new THREE.MeshStandardMaterial({ map: curb, roughness: 0.7 }),
     curbSide: new THREE.MeshStandardMaterial({ color: '#c81e26', roughness: 0.7 }),
+    styles: {
+      sand: { top: roadMat(sandTexture(), 0.95), side: sideMat('#4f9e86'), line: lineMat('#6b6238'), barrier: sideMat('#5c5a32') },
+      pink: { top: roadMat(speckleTexture('#ee9a92', '#d77b74'), 0.9), side: sideMat('#a8645e'), line: lineMat('#9a4a48'), barrier: sideMat('#6b4632') },
+      checker: { top: roadMat(roadCheckerTexture(), 0.7), side: sideMat('#3f8f6c'), line: lineMat('#2f5f80'), barrier: sideMat('#8a3d5c') },
+      lilac: { top: roadMat(speckleTexture('#e2d2f2', '#cbb6e2'), 0.85), side: sideMat('#b08ccf'), line: lineMat('#6e4a6a'), barrier: sideMat('#5e3846') },
+      orange: { top: roadMat(diamondTexture(), 0.85), side: sideMat('#9a6ac0'), line: lineMat('#a8641c'), barrier: sideMat('#7a4a9a') },
+      mint: { top: roadMat(mintTexture(), 0.75), side: sideMat('#b04f86'), line: lineMat('#23805a'), barrier: sideMat('#2c6a4a') },
+    },
+    // speed pads in the reference colours; their chevrons scroll forwards
+    boosts: {
+      orange: padMat('#ff7a12', '#ffd23a', '#fff1a0'),
+      cyan: padMat('#22b8e8', '#8ff4ff', '#ffffff'),
+      pink: padMat('#ff3fa8', '#ffa8e0', '#ffffff'),
+    },
+    frame: new THREE.MeshStandardMaterial({ color: '#4fa39a', roughness: 0.7 }),
+    bolt: new THREE.MeshBasicMaterial({ color: '#fff6a0', transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending }),
+    beam: new THREE.MeshBasicMaterial({ color: '#ffd84a', transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+    wall: new THREE.MeshStandardMaterial({ color: '#f02a22', roughness: 0.6 }),
+    rail: new THREE.MeshStandardMaterial({ color: '#5a5a3a', roughness: 0.85 }),
+    flag: new THREE.MeshStandardMaterial({ color: '#3fd04a', roughness: 0.6, side: THREE.DoubleSide }),
+    ringTile: new THREE.MeshStandardMaterial({ color: '#ff8ad8', emissive: '#ff4fc0', emissiveIntensity: 0.5, roughness: 0.5 }),
   };
   return mats;
 }
@@ -122,55 +243,96 @@ export function buildCourse(scene, physics) {
 
   // ------------------------------------------------ segments
   const pushers = [];
-  const r = rng(11);
+  const flags = [];
+  const rings = [];
+  const strikes = [];
+  let ringRun = 0;
   for (const seg of COURSE.segs) {
     if (seg.kind === 'gap') continue;
-    const c = segCorners(seg);
-    const top = [
-      { ...c[0], y: seg.a.y }, { ...c[1], y: seg.a.y }, { ...c[2], y: seg.b.y }, { ...c[3], y: seg.b.y },
-    ];
-    const sand = seg.kind === 'sand';
-    addSlab(group, top, sand ? M.sand : M.top, sand ? M.teal : M.side);
+    const st = M.styles[seg.style] || M.styles.sand;
+    const bank = M.styles[seg.bankStyle] || st;
+    const road = new THREE.Mesh(roadGeometry(seg), [st.top, st.side, bank.top]);
+    road.castShadow = true;
+    road.receiveShadow = true;
+    group.add(road);
+    group.add(new THREE.LineSegments(roadLines(seg), st.line));
     physics.addSegment(seg);
 
-    if (!sand) {
-      const inner = segCorners(seg, cw);
-      const left = [c[0], inner[0], inner[3], c[3]];
-      const right = [inner[1], c[1], c[2], inner[2]];
-      for (const q of [left, right]) {
-        // strip from the a-end (q[0], q[1]) to the b-end (q[2], q[3])
-        curbMesh(group, [q[0], q[1], q[2], q[3]], seg.a.y, seg.b.y);
-        const ya = seg.a.y, yb = seg.b.y;
-        physics.addSurface(q, Math.max(ya, yb) + WORLD.curbH, (x, z) => {
-          const t = Math.max(0, Math.min(1, ((x - seg.a.x) * seg.dx + (z - seg.a.z) * seg.dz) / seg.len));
-          return ya + (yb - ya) * t + WORLD.curbH;
-        });
-      }
-    }
-
-    // obstacles
     const at = (t, side) => ({
       x: seg.a.x + seg.dx * seg.len * t - seg.dz * side,
       z: seg.a.z + seg.dz * seg.len * t + seg.dx * side,
-      y: seg.a.y + (seg.b.y - seg.a.y) * t,
+      y: segTop(seg, t, side),
     });
-    if (seg.props === 'tires') {
-      for (let i = 0; i < 6; i++) {
-        const p = at(0.2 + (i / 6) * 0.65, (r() - 0.5) * (seg.w - 22));
-        const stack = tyreStack(2 + Math.floor(r() * 3));
-        stack.position.set(p.x, p.y, p.z);
-        group.add(stack);
-        physics.addCylinder({ x: p.x, z: p.z, r: 3.4, top: p.y + stack.userData.h, bottom: p.y - 1 });
+    const yaw = Math.atan2(seg.dx, seg.dz);
+    const has = (k) => (seg.props || '').split(' ').includes(k);
+
+    if (has('boost') && (!seg.curve || seg.i % 2 === 0)) {
+      const n = seg.len > 60 ? 2 : 1;
+      for (let i = 0; i < n; i++) {
+        const p = at(n > 1 ? 0.3 + i * 0.4 : 0.5, ((seg.i + i) % 2 ? 1 : -1) * seg.w * 0.18);
+        const pad = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), M.boosts[seg.boostColor] || M.boosts.orange);
+        pad.rotation.set(-Math.PI / 2, 0, yaw + Math.PI);
+        pad.position.set(p.x, p.y + 0.06, p.z);
+        group.add(pad);
+        physics.addBoost({ x: p.x, z: p.z, w: 14, d: 14, rot: yaw, y: p.y });
       }
-    } else if (seg.props === 'barrels') {
-      for (let i = 0; i < 7; i++) {
-        const p = at(0.18 + (i / 7) * 0.7, (r() - 0.5) * (seg.w - 20));
-        const b = barrel();
-        b.position.set(p.x, p.y, p.z);
-        group.add(b);
-        physics.addCylinder({ x: p.x, z: p.z, r: 2.4, top: p.y + 5.5, bottom: p.y - 1 });
+    }
+    if (has('walls')) {
+      // tall red blocks on the edges, on alternate sides, hanging out over the lava
+      for (let i = 0; i < 4; i++) {
+        const side = (i % 2 ? 1 : -1) * (seg.w / 2 + 1);
+        const p = at(0.12 + i * 0.24, side);
+        const w = 8, d = 20, h = 32;
+        const m = box(w, h, d, M.wall, { x: p.x, y: p.y + h / 2, z: p.z, ry: yaw });
+        group.add(m);
+        physics.addBox({ x: p.x, z: p.z, w, d, rot: yaw, top: p.y + h, bottom: p.y - 1 });
       }
-    } else if (seg.props === 'pushers') {
+    }
+    if (has('rails')) {
+      // low dark bars along both edges, with gaps
+      for (let i = 0; i < 5; i++) {
+        for (const sx of [-1, 1]) {
+          const p = at(0.08 + i * 0.2, sx * (seg.w / 2 - 3));
+          const len = seg.len * 0.12;
+          group.add(box(2, 2.4, len, M.rail, { x: p.x, y: p.y + 1.2, z: p.z, ry: yaw }));
+          physics.addBox({ x: p.x, z: p.z, w: 2, d: len, rot: yaw, top: p.y + 2.4, bottom: p.y - 1 });
+        }
+      }
+    }
+    if (has('barriers')) {
+      // low walls along both edges in pieces with gaps; they stop the truck driving off
+      const pieces = seg.curve ? 1 : Math.max(1, Math.round(seg.len / 34));
+      for (let i = 0; i < pieces; i++) {
+        for (const sx of [-1, 1]) {
+          if ((i + (sx > 0 ? 1 : 0) + seg.i) % 3 === 2 && pieces > 1) continue;   // a gap here and there
+          const t0 = i / pieces, t1 = (i + 1) / pieces;
+          const len = seg.len * (t1 - t0) * (seg.curve ? 1.05 : 0.8);
+          const p = at((t0 + t1) / 2, sx * (seg.w / 2 - 1.6));
+          group.add(box(2.4, 3.2, len, st.barrier, { x: p.x, y: p.y + 1.4, z: p.z, ry: yaw }));
+          physics.addBox({ x: p.x, z: p.z, w: 2.4, d: len, rot: yaw, top: p.y + 3, bottom: p.y - 2, block: true });
+        }
+      }
+    }
+    if (has('frames')) {
+      // teal tunnel arches: two posts on the edges and a beam over the road
+      const n = Math.max(2, Math.round(seg.len / 40));
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n;
+        const c = at(t, 0);
+        const arch = new THREE.Group();
+        for (const sx of [-1, 1]) arch.add(box(2.5, 22, 4, M.frame, { x: sx * (seg.w / 2 - 1.2), y: 11 }));
+        arch.add(box(seg.w, 3, 4, M.frame, { y: 22.5 }));
+        arch.position.set(c.x, c.y, c.z);
+        arch.rotation.y = yaw;
+        arch.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+        group.add(arch);
+        for (const sx of [-1, 1]) {
+          const p = at(t, sx * (seg.w / 2 - 1.2));
+          physics.addBox({ x: p.x, z: p.z, w: 2.5, d: 4, rot: yaw, top: p.y + 22, bottom: p.y - 2, block: true });
+        }
+      }
+    }
+    if (has('pushers')) {
       for (let i = 0; i < 3; i++) {
         const t = 0.25 + i * 0.25;
         const p = at(t, 0);
@@ -180,11 +342,30 @@ export function buildCourse(scene, physics) {
         m.add(box(w + 0.1, 1.4, d + 0.1, plastic('#f7f7f7'), { y: h * 0.55 }));
         m.add(box(w * 0.6, 0.5, d + 0.2, neon('#ffd21a', 0.6), { y: h - 0.8 }));
         m.position.set(p.x, p.y, p.z);
-        m.rotation.y = Math.atan2(seg.dx, seg.dz);
+        m.rotation.y = yaw;
         group.add(m);
         const solid = physics.addBox({ x: p.x, z: p.z, w, d, rot: m.rotation.y, top: p.y + h, bottom: p.y - 1 });
-        pushers.push({ mesh: m, solid, base: p, nx: -seg.dz, nz: seg.dx, amp: (seg.w - w) / 2 - cw - 1, speed: 0.7 + i * 0.25, phase: i * 1.7 });
+        pushers.push({ mesh: m, solid, base: p, nx: -seg.dz, nz: seg.dx, amp: (seg.w - w) / 2 - 4, speed: 0.7 + i * 0.25, phase: i * 1.7 });
       }
+    }
+
+    // pink speed rings floating over the road: a few along each ring stretch, not a row of them
+    ringRun = has('rings') ? ringRun + 1 : 0;
+    if (ringRun % 4 === 1) rings.push(checkpointGate(group, physics, seg, M, at, yaw));
+
+    // checkpoint flag at the start of every stage after the first
+    if (seg.stage > 0 && COURSE.segs[seg.i - 1]?.stage !== seg.stage) {
+      // the flag stands in the middle of the plate
+      const p = at(0.5, 0);
+      const flag = new THREE.Group();
+      flag.add(cylinder(0.25, 0.25, 9, plastic('#2b2b2e'), { y: 4.5, segments: 8 }));
+      flag.add(box(3.6, 2.2, 0.15, M.flag, { x: 1.9, y: 7.8 }));
+      flag.add(cylinder(1.2, 1.4, 0.4, plastic('#2b2b2e'), { y: 0.2, segments: 12 }));
+      flag.position.set(p.x, p.y, p.z);
+      flag.rotation.y = yaw + Math.PI / 2;
+      flag.userData.stage = seg.stage;
+      group.add(flag);
+      flags.push(flag);
     }
   }
 
@@ -241,7 +422,29 @@ export function buildCourse(scene, physics) {
     setCollected(ids) {
       for (const p of potions) p.mesh.visible = !ids.includes(p.id);
     },
+    // checkpoint reached: a bolt of lightning and a beam of light strike its flag
+    strike(stage) {
+      const flag = flags.find((f) => f.userData.stage === stage);
+      if (flag) strikes.push(lightning(group, M, flag.position));
+    },
     update(dt, time) {
+      for (const f of flags) f.children[1].rotation.y = Math.sin(time * 3 + f.position.x) * 0.25;
+      // rings turn and breathe (grow and shrink)
+      for (const r of rings) {
+        r.rotation.z = time * 0.8;
+        r.parent.scale.setScalar(1 + 0.22 * Math.sin(time * 2.4 + r.parent.position.x * 0.05));
+      }
+      // speed pad chevrons run forwards
+      for (const m of Object.values(M.boosts)) m.map.offset.y = -((time * 1.6) % 1);
+      for (let i = strikes.length - 1; i >= 0; i--) {
+        const s = strikes[i];
+        s.life -= dt;
+        const k = Math.max(0, s.life / s.max);
+        s.bolt.material.opacity = k > 0.6 ? (Math.sin(time * 60) > 0 ? 1 : 0.3) : k;
+        s.beam.material.opacity = 0.55 * k;
+        s.beam.scale.x = s.beam.scale.z = 1 + (1 - k) * 0.6;
+        if (s.life <= 0) { group.remove(s.bolt, s.beam); s.bolt.geometry.dispose(); strikes.splice(i, 1); }
+      }
       for (const p of pushers) {
         const s = Math.sin(time * p.speed + p.phase) * p.amp;
         const x = p.base.x + p.nx * s, z = p.base.z + p.nz * s;
@@ -257,28 +460,48 @@ export function buildCourse(scene, physics) {
   };
 }
 
-function tyreStack(n) {
-  const g = new THREE.Group();
-  const geo = new THREE.TorusGeometry(2.2, 1.1, 10, 22);
-  const mat = plastic('#26262a', { roughness: 0.95 });
-  for (let i = 0; i < n; i++) {
-    const t = new THREE.Mesh(geo, mat);
-    t.rotation.x = Math.PI / 2;
-    t.position.set((i % 2) * 0.3, 1.1 + i * 2.05, 0);
-    t.castShadow = true;
-    g.add(t);
+// Pink speed ring: tiles turning slowly in a ring standing on the road; driving through it boosts the
+// truck. Returns the ring.
+function checkpointGate(group, physics, seg, M, at, yaw) {
+  const t = Math.min(0.12, 18 / seg.len);
+  const top = 13;           // ring centre above the road: it floats over the trucks
+  const c = at(t, 0);
+  const ring = new THREE.Group();
+  const tile = new THREE.BoxGeometry(2.6, 1.2, 0.6);
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const m = new THREE.Mesh(tile, M.ringTile);
+    m.position.set(Math.cos(a) * 9, Math.sin(a) * 9, 0);
+    m.rotation.z = a + Math.PI / 2;
+    ring.add(m);
   }
-  g.userData.h = n * 2.05 + 0.3;
-  return g;
+  const holder = new THREE.Group();
+  holder.position.set(c.x, c.y + top, c.z);
+  // driving through the ring gives a burst of speed
+  physics.addBoost({ x: c.x, z: c.z, w: 18, d: 8, rot: yaw, y: c.y });
+  holder.rotation.y = yaw;
+  holder.add(ring);
+  group.add(holder);
+  return ring;
 }
 
-function barrel() {
-  const g = new THREE.Group();
-  g.add(cylinder(2.1, 2.1, 5.4, plastic('#d2141c', { roughness: 0.5 }), { y: 2.7, segments: 18 }));
-  for (const y of [1.0, 4.4]) g.add(cylinder(2.18, 2.18, 0.35, plastic('#2b2b2e'), { y, segments: 18 }));
-  g.add(cylinder(1.6, 1.6, 0.12, plastic('#ffd21a'), { y: 5.45, segments: 18, cast: false }));
-  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  return g;
+// A jagged bolt from the sky down to p and a wide column of yellow light round it. Each has its own
+// material so it can fade on its own.
+function lightning(group, M, p) {
+  const pts = [];
+  let x = p.x, z = p.z;
+  for (let y = p.y + 160; y > p.y; y -= 14) {
+    pts.push(new THREE.Vector3(x, y, z));
+    x = p.x + (Math.random() - 0.5) * 10;
+    z = p.z + (Math.random() - 0.5) * 10;
+  }
+  pts.push(new THREE.Vector3(p.x, p.y + 2, p.z));
+  const path = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0);
+  const bolt = new THREE.Mesh(new THREE.TubeGeometry(path, pts.length * 3, 0.7, 5, false), M.bolt.clone());
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(6, 7, 170, 20, 1, true), M.beam.clone());
+  beam.position.set(p.x, p.y + 85, p.z);
+  group.add(bolt, beam);
+  return { bolt, beam, life: 1.4, max: 1.4 };
 }
 
 function potionMesh() {

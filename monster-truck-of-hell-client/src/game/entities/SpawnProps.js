@@ -113,10 +113,13 @@ function wheelFaceTexture() {
   return canvasTexture(c);
 }
 
+const WHEEL_SCALE = 1.7;    // the giant tyre towers over the trucks
+
 function dailyWheel(scene, physics, pos) {
   const root = new THREE.Group();
   root.position.set(pos.x, 0, pos.z);
   root.rotation.y = pos.ry || 0;
+  root.scale.setScalar(WHEEL_SCALE);
   scene.add(root);
   const R = 11.5, W = 7;
   // stand: bronze trapezoid base
@@ -178,7 +181,7 @@ function dailyWheel(scene, physics, pos) {
   const ring = hexRing(11, 8.4, 0.35, neon('#ffd21a', 0.9), 0.06);
   root.add(ring);
   root.traverse((o) => { if (o.isMesh && o !== face) o.castShadow = true; });
-  physics.addBox({ x: pos.x, z: pos.z, w: 16, d: 8, rot: pos.ry || 0, top: 30, bottom: -2 });
+  physics.addBox({ x: pos.x, z: pos.z, w: 16 * WHEEL_SCALE, d: 8 * WHEEL_SCALE, rot: pos.ry || 0, top: 30 * WHEEL_SCALE, bottom: -2 });
 
   let spin = null;
   return {
@@ -284,9 +287,12 @@ function showcase(scene, physics, truckId, pos) {
 // ---------------------------------------------------------------- all props
 export function buildSpawnProps(scene, physics) {
   fins(scene, physics);
-  const wheel = dailyWheel(scene, physics, { x: 46, z: -86, ry: -0.25 });
+  const wp = { x: 40, z: -86, ry: -0.25 };
+  const wheel = dailyWheel(scene, physics, wp);
+  // the pass pads stand in a row on the wheel's right, as in the reference
   const padIds = ['x2_xp', 'x2_cash', 'nitro', 'more_hats'];
-  const pads = padIds.map((id, i) => buffPad(scene, id, { x: 70 + i * 13.5, z: -96 + i * 2 }));
+  const rx = Math.cos(wp.ry), rz = -Math.sin(wp.ry);
+  const pads = padIds.map((id, i) => buffPad(scene, id, { x: wp.x + rx * (30 + i * 13), z: wp.z + rz * (30 + i * 13) }));
   const shows = [
     showcase(scene, physics, 'flower_power', { x: -48, z: -94, ry: 0.35 }),
     showcase(scene, physics, 'cyber_beast', { x: -72, z: -90, ry: 0.45 }),

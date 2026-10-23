@@ -232,8 +232,9 @@ export class StartingPlaceRoom extends Room {
     s.last = { x, y, z };
     p.x = x; p.y = y; p.z = z;
     p.ry = num(m.ry) ?? p.ry;
-    p.rx = Math.max(-1, Math.min(1, num(m.rx) ?? 0));
-    p.rz = Math.max(-1, Math.min(1, num(m.rz) ?? 0));
+    // a truck can roll right over, so pitch / roll cover the whole turn
+    p.rx = Math.max(-Math.PI, Math.min(Math.PI, num(m.rx) ?? 0));
+    p.rz = Math.max(-Math.PI, Math.min(Math.PI, num(m.rz) ?? 0));
 
     if (this.state.racePhase !== 'race' || s.finished || z > -WORLD.plazaHalf) return;
     const loc = courseLocate(x, z, y);

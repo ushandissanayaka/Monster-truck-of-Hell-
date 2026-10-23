@@ -139,8 +139,8 @@ const PAINT = /* glsl */`
     // near range: the towering wall, broken by a few deep gaps; far range: lower, hazed by the
     // sunset air. The rock is painted once, for whichever range is in front.
     float gaps = mix(0.3, 1.0, smoothstep(0.2, 0.42, fbm(vec3(c * 2.6, 40.0))));
-    float near = ridgeLine(c, 0.0, 0.3, 1.05, sun) * gaps;
-    float far = ridgeLine(c, 11.0, 0.10, 0.42, sun);
+    float near = ridgeLine(c, 0.0, 0.12, 0.55, sun) * gaps;
+    float far = ridgeLine(c, 11.0, 0.06, 0.3, sun);
     bool isNear = el < near;
     if (isNear || el < far) {
       float s = isNear ? 1.0 : 1.3;
