@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>Monster Truck of Hell</title>
+    <link rel="preload" as="image" href="./loading/thumb.jpg" />
+    <link rel="preload" as="image" href="./loading/background.jpg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bangers&family=Fredoka:wght@500;600;700&family=Luckiest+Guy&family=Montserrat:wght@600;800&family=Nunito:wght@700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <!-- Boxity SDK (pinned v1): must load before the game code and before any matchmaker request. -->
+    <script src="https://sdk.bloxity.io/v1/legion-sdk.min.js"></script>
+    <!-- Loading screen in the page itself, so it shows at once while the game downloads and starts.
+         The game removes it (src/ui/boot.js) when everything has loaded. -->
+    <style>
+      .boot { position: fixed; inset: 0; z-index: 1000; overflow: hidden; background: #1a0505; transition: opacity 0.6s ease; }
+      .boot.out { opacity: 0; pointer-events: none; }
+      .boot-bg {
+        position: absolute; inset: -40px; background: url('./loading/background.jpg') center / cover no-repeat;
+        filter: blur(26px) brightness(0.42) saturate(1.25); transform: scale(1.12);
+      }
+      .boot-card {
+        position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        font-family: Montserrat, 'Segoe UI', system-ui, sans-serif; text-align: center; padding: 0 16px;
+      }
+      .boot-thumb { position: relative; width: 150px; height: 150px; margin-bottom: 30px; animation: boot-in 0.5s ease-out; }
+      .boot-thumb img {
+        width: 100%; height: 100%; object-fit: cover; border-radius: 9px; display: block;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
+      }
+      .boot-sp { position: absolute; border-radius: 50%; background: #c9a227; box-shadow: 0 0 6px rgba(240, 200, 60, 0.6); animation: boot-twinkle 2.4s ease-in-out infinite; }
+      .boot-sp.s1 { width: 10px; height: 10px; left: -10px; top: -6px; }
+      .boot-sp.s2 { width: 8px; height: 8px; right: 14px; top: -14px; animation-delay: 0.8s; }
+      .boot-sp.s3 { width: 6px; height: 6px; right: -10px; top: 14px; animation-delay: 1.6s; }
+      .boot-title { display: inline-flex; align-items: center; gap: 10px; color: #eef1f6; font-size: 25px; font-weight: 800; letter-spacing: 0.2px; }
+      .boot-title svg { width: 22px; height: 22px; flex: none; }
+      .boot-sub { margin-top: 10px; color: #9aa3b4; font-size: 17px; font-weight: 600; }
+      .boot-dots { display: flex; gap: 11px; margin-top: 30px; }
+      .boot-dots i { width: 10px; height: 10px; border-radius: 50%; background: #fff; animation: boot-dot 1.2s ease-in-out infinite; }
+      .boot-dots i:nth-child(2) { animation-delay: 0.15s; }
+      .boot-dots i:nth-child(3) { animation-delay: 0.3s; }
+      @keyframes boot-dot { 0%, 60%, 100% { transform: translateY(0); opacity: 0.55; } 30% { transform: translateY(-7px); opacity: 1; } }
+      @keyframes boot-twinkle { 0%, 100% { opacity: 0.35; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.15); } }
+      @keyframes boot-in { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
+    </style>
+  </head>
+  <body>
+    <div id="boot" class="boot" role="status" aria-label="Loading Monster Truck of Hell">
+      <div class="boot-bg"></div>
+      <div class="boot-card">
+        <div class="boot-thumb">
+          <img src="./loading/thumb.jpg" alt="" />
+          <i class="boot-sp s1"></i><i class="boot-sp s2"></i><i class="boot-sp s3"></i>
+        </div>
+        <div class="boot-title">
+          Monster Truck of Hell
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#22c55e" /><path d="M7 12.5 L10.5 16 L17 8.5" fill="none" stroke="#0c121c" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </div>
+        <div class="boot-sub">User Created Game</div>
+        <div class="boot-dots"><i></i><i></i><i></i></div>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="./src/main.jsx"></script>
+  </body>
+</html>
