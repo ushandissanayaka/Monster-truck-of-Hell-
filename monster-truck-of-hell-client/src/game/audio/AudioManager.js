@@ -255,6 +255,12 @@ class AudioManager {
 
   // ---- movement
   jump() { this.tone(330, 0.14, 'sine', 0.12, 220); }
+  // checkpoint lightning: a crack and a rolling rumble
+  thunder() {
+    this.noise(0.25, { filter: 'highpass', freq: 1800, gain: 0.18 });
+    this.noise(1.4, { filter: 'lowpass', freq: 420, sweepTo: 90, gain: 0.22, delay: 0.05 });
+    this.bell(1568, 0.5, 0.05, 0.1, 2);
+  }
 
   teleport() {
     this.tone(200, 0.5, 'sawtooth', 0.06, 900);

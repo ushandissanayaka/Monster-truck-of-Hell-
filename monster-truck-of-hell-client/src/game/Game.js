@@ -225,10 +225,11 @@ export class Game {
   registerInteractions() {
     const p = this.world.parts;
     const I = this.interaction;
-    I.add({ id: 'wheel', position: p.wheel.position, radius: 20, height: 28, object: 'Daily Wheel', action: 'Open', onTrigger: () => openModal('wheel'), autoOpen: true, modal: 'wheel' });
+    I.add({ id: 'wheel', position: p.wheel.position, radius: 32, height: 48, object: 'Daily Wheel', action: 'Open', onTrigger: () => openModal('wheel'), autoOpen: true, modal: 'wheel' });
     for (const pad of p.pads) {
       const pass = PASSES.find((x) => x.id === pad.id);
-      I.add({ id: `pad_${pad.id}`, position: pad.position, radius: 8, height: 12, object: pass.name, action: 'Buy', onTrigger: () => openModal('pass', pad.id), autoOpen: true, modal: 'pass' });
+      // press E: straight to the Bloxity payment popup for the pass
+      I.add({ id: `pad_${pad.id}`, position: pad.position, radius: 7, height: 12, object: pass.name, action: 'Buy', onTrigger: () => this.actions.purchase(pass.sku) });
     }
     for (const sh of p.shows) {
       const t = truckById(sh.id);
@@ -318,7 +319,7 @@ export class Game {
       this.player.teleport(c.x, c.y, c.z);
     });
     room.onMessage('stage', (m) => {
-      toast(`Stage ${m.stage + 1}! +${formatShort(m.cash)} Cash`, 'cash');
+      centerText(`Checkpoint ${m.stage} reached +${formatShort(m.cash)} cash`, '#c8ff3a');
       audio.coin();
     });
     room.onMessage('potion', (m) => this.onPotion(m.id, m.cash));
@@ -491,6 +492,10 @@ export class Game {
     if (pl.jumped) { pl.jumped = false; audio.jump(); }
     if (pl.landed) { pl.landed = false; audio.land?.(); }
     if (pl.fellInLava) this.onLava();
+    if (pl.flipped !== !!this.flipHint) {
+      this.flipHint = pl.flipped;
+      if (pl.flipped) centerText('Space + A / D (or W / S) to roll it back!');
+    }
     this.updateRace();
 
     const focus = this._focus || (this._focus = new THREE.Vector3());
@@ -539,7 +544,14 @@ export class Game {
       }
     }
     const stage = stageAt(this.best);
-    if (stage !== s.stage) store.setState({ stage });
+    if (stage !== s.stage) {
+      if (stage > s.stage) {
+        this.world.parts.course.strike(stage);
+        audio.thunder?.();
+        if (!this.room) centerText(`Checkpoint ${stage} reached`, '#c8ff3a');
+      }
+      store.setState({ stage });
+    }
     // potions
     for (const po of POTIONS) {
       if (s.potions.includes(po.id)) continue;

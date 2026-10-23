@@ -213,3 +213,96 @@ export function lavaMaterial() {
       }`,
   }));
 }
+
+// ---------------------------------------------------------------- course road surfaces
+// light-blue two-tone checker road (one texture = 2 x 2 squares)
+export function roadCheckerTexture() {
+  return cached('roadChecker', () => {
+    const [c, g] = canvas(128, 128);
+    g.fillStyle = '#5cb4e6';
+    g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#4a9fd4';
+    g.fillRect(0, 0, 64, 64);
+    g.fillRect(64, 64, 64, 64);
+    return tex(c);
+  });
+}
+
+// smooth mint-green road with a faint mottle
+export function mintTexture() {
+  return cached('mint', () => {
+    const [c, g] = canvas(128, 128);
+    g.fillStyle = '#3fd497';
+    g.fillRect(0, 0, 128, 128);
+    const r = rng(19);
+    for (let i = 0; i < 40; i++) {
+      g.fillStyle = `rgba(255,255,255,${0.03 + r() * 0.04})`;
+      g.beginPath();
+      g.arc(r() * 128, r() * 128, 6 + r() * 14, 0, Math.PI * 2);
+      g.fill();
+    }
+    return tex(c);
+  });
+}
+
+// orange / yellow chevrons of a speed pad (pointing to +v; repeats so it can scroll)
+export function chevronTexture(lo = '#ff7a12', hi = '#ffd23a', mark = '#fff1a0') {
+  return cached(`chevron|${lo}|${hi}`, () => {
+    const [c, g] = canvas(128, 128);
+    const grd = g.createLinearGradient(0, 128, 0, 0);
+    grd.addColorStop(0, lo);
+    grd.addColorStop(1, hi);
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 128, 128);
+    g.fillStyle = mark;
+    for (const y of [20, 70]) {
+      g.beginPath();
+      g.moveTo(14, y + 40); g.lineTo(64, y); g.lineTo(114, y + 40); g.lineTo(114, y + 56); g.lineTo(64, y + 16); g.lineTo(14, y + 56);
+      g.closePath();
+      g.fill();
+    }
+    return tex(c);
+  });
+}
+
+// a flat road colour with soft darker spots (pink and lilac stretches)
+export function speckleTexture(base, spot) {
+  return cached('speckle|' + base + '|' + spot, () => {
+    const [c, g] = canvas(256, 256);
+    g.fillStyle = base;
+    g.fillRect(0, 0, 256, 256);
+    const r = rng(23);
+    for (let i = 0; i < 60; i++) {
+      const x = r() * 256, y = r() * 256, rr = 3 + r() * 7;
+      g.fillStyle = spot;
+      g.globalAlpha = 0.35 + r() * 0.25;
+      for (const ox of [-256, 0, 256]) for (const oy of [-256, 0, 256]) {
+        g.beginPath();
+        g.ellipse(x + ox, y + oy, rr, rr * 0.6, r() * 3, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    g.globalAlpha = 1;
+    return tex(c);
+  });
+}
+
+// amber road with outlined diamonds (the orange tunnel stretch)
+export function diamondTexture(base = '#f4b43c', line = '#d98f22') {
+  return cached('diamond|' + base, () => {
+    const [c, g] = canvas(256, 256);
+    g.fillStyle = base;
+    g.fillRect(0, 0, 256, 256);
+    g.strokeStyle = line;
+    g.lineWidth = 4;
+    const r = rng(31);
+    for (let i = 0; i < 9; i++) {
+      const x = 28 + (i % 3) * 85 + (r() - 0.5) * 20, y = 28 + Math.floor(i / 3) * 85 + (r() - 0.5) * 20, s = 12 + r() * 8;
+      g.beginPath();
+      g.moveTo(x, y - s); g.lineTo(x + s * 0.7, y); g.lineTo(x, y + s); g.lineTo(x - s * 0.7, y);
+      g.closePath();
+      g.stroke();
+    }
+    return tex(c);
+  });
+}

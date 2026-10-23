@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { lavaMaterial } from '../util/textures.js';
 import { createSkyDome } from '../util/sky.js';
+import { buildLavaPit } from './LavaPit.js';
 import { WORLD } from '../../shared/gameData.js';
 
 export function createEnvironment(scene, renderer, quality = 'High') {
@@ -15,12 +16,13 @@ export function createEnvironment(scene, renderer, quality = 'High') {
   const sky = createSkyDome(renderer, quality);
   scene.add(sky);
 
-  // only a disc around you: seen from the middle of the stage its far edge hides below the stage edge
-  // (the sky dome's mountain wall fills the view down there); go to the edge to look down at it
-  const lava = new THREE.Mesh(new THREE.CircleGeometry(3000, 64), lavaMaterial());
+  // the lava sea reaches the horizon all round, fading into the haze (as in the reference)
+  const lava = new THREE.Mesh(new THREE.CircleGeometry(12000, 64), lavaMaterial());
   lava.rotation.x = -Math.PI / 2;
   lava.position.y = WORLD.lavaY;
   scene.add(lava);
+  // the jagged rocks standing in the lava under the course
+  buildLavaPit(scene);
 
   // lights: neutral daylight on the grey studs (as in the reference) with a warm sun and a red bounce
   scene.add(new THREE.HemisphereLight('#fff1e8', '#a03020', 1.25));

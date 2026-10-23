@@ -9,8 +9,8 @@ export const WORLD = {
   avatarScale: 0.42,      // the driver sitting in the cab
   plazaHalf: 120,         // spawn plaza: x, z in [-120, 120], top y = 0
   exitHalf: 32,           // opening in the north curb where the course starts
-  lavaY: -450,            // the plaza and the course float high above the lava sea
-  slabDepth: 14,          // thickness of each floating slab below its lowest top corner
+  lavaY: -420,            // the lava sea, a terrifying drop below the plaza and the course
+  slabDepth: 10,          // thickness of each floating slab below its lowest top corner
   curbW: 3,
   curbH: 0.8,
   stud: 1.25,             // stud texture size (world units)
@@ -36,40 +36,143 @@ export const STAGE_COLORS = [
 ];
 
 // heading 0 = north (-z), positive turns right (towards +x). dy: height change over the segment.
-// kind: slab (grey studs + curbs), sand (ramp, no curbs), gap (lava, nothing built).
-// props: obstacles placed on the segment ('tires' | 'pushers' | 'barrels').
-const PATH = [
-  { stage: 0, kind: 'sand', len: 90, dy: -12, w: 60 },
-  { stage: 0, kind: 'slab', len: 280, w: 76 },
-  { stage: 1, kind: 'slab', turn: 40, len: 300, w: 76, props: 'tires' },
-  { stage: 1, kind: 'slab', turn: -40, len: 160, w: 76 },
-  { stage: 2, kind: 'sand', len: 40, dy: 6, w: 60 },
-  { stage: 2, kind: 'gap', len: 28, dy: -16, w: 60 },
-  { stage: 2, kind: 'slab', len: 240, w: 76, props: 'tires' },
-  { stage: 3, kind: 'slab', turn: -60, len: 300, w: 76, props: 'barrels' },
-  { stage: 4, kind: 'sand', len: 100, dy: 14, w: 60 },
-  { stage: 4, kind: 'slab', len: 200, w: 70 },
-  { stage: 5, kind: 'slab', turn: 90, len: 260, w: 70, props: 'pushers' },
-  { stage: 5, kind: 'slab', turn: 45, len: 200, w: 70 },
-  { stage: 6, kind: 'slab', turn: -45, len: 200, w: 46 },
-  { stage: 6, kind: 'sand', len: 40, dy: 6, w: 46 },
-  { stage: 7, kind: 'gap', len: 28, dy: -14, w: 46 },
-  { stage: 7, kind: 'slab', len: 260, w: 76, props: 'tires' },
-  { stage: 8, kind: 'slab', turn: -70, len: 300, w: 76, props: 'barrels' },
-  { stage: 8, kind: 'slab', turn: 70, len: 200, w: 76 },
-  { stage: 9, kind: 'sand', len: 80, dy: -10, w: 60 },
-  { stage: 9, kind: 'slab', len: 260, w: 80, props: 'pushers' },
-  { stage: 10, kind: 'slab', turn: 50, len: 300, w: 76, props: 'tires' },
-  { stage: 10, kind: 'slab', turn: -50, len: 200, w: 76 },
-  { stage: 11, kind: 'sand', len: 100, dy: 16, w: 60 },
-  { stage: 11, kind: 'slab', len: 220, w: 90, finish: true },
-];
+// The course is a chain of separate floating pieces, as in the reference: each piece can start a
+// ledge lower than the last (drop), lean (twist: extra height at its [left start, right start, left
+// end, right end] corners), be a halfpipe (bank: height of the faceted walls at its sides) or bend
+// (curve: a run of short pieces turning a little each).
+// kind: road (a slab you drive on) | gap (lava, nothing built).
+// style: the road look - sand (teal sides) | pink | checker (light blue) | lilac | orange (diamonds,
+//        teal tunnel frames) | mint; bankStyle: another look for the halfpipe walls.
+// props: words for what stands on it - 'barriers' low walls along both edges (with gaps) that stop
+//        you driving off, 'boost' speed pads (boostColor: orange | cyan | pink), 'rings' pink speed
+//        rings floating over the road, 'walls' tall red blocks, 'frames' tunnel arches.
+const PATH = [];
+const LONG = 1.3;          // every road piece is this much longer than written below
+const road = (stage, o) => PATH.push({ stage, kind: 'road', ...o, len: o.len * LONG });
+const gap = (stage, len, dy, w) => PATH.push({ stage, kind: 'gap', len, dy, w });
+const jump = (stage, o) => { road(stage, { ...o, len: 32, dy: 7, props: o.props }); gap(stage, 30, -11, o.w); };
+// a bend made of short straight pieces
+const curve = (stage, deg, len, o) => {
+  const n = Math.max(3, Math.round(Math.abs(deg) / 10));
+  for (let i = 0; i < n; i++) road(stage, { ...o, turn: deg / n, len: len / n, dy: (o.dy || 0) / n, drop: i === 0 ? o.drop : 0, curve: true });
+};
+
+// 0: out of the plaza: a narrow sand road onto a wide fan, a straight sand halfpipe and a bend
+road(0, { style: 'sand', len: 100, dy: -8, w: 44 });
+// a wide plate with a flat wing angled up on each side, and a steep ramp up out of its middle
+road(0, { style: 'sand', len: 100, drop: -2, w: 150, bank: 16, bankFlat: true, single: true });
+road(0, { style: 'sand', len: 150, dy: 55, w: 50, bank: 10, single: true });
+road(0, { style: 'sand', len: 260, dy: 6, w: 100, bank: 22, props: 'rings' });
+road(0, { style: 'sand', len: 90, w: 80 });
+curve(0, -40, 180, { style: 'sand', w: 90, bank: 16, props: 'rings' });
+// 1: leaning plateaus a ledge lower each time, a kicker and a jump
+road(1, { style: 'sand', turn: 25, len: 110, drop: -3, w: 90, twist: [-3, 4, 3, -4] });
+road(1, { style: 'sand', turn: -30, len: 100, drop: -3, w: 80, twist: [4, -2, 0, 3] });
+road(1, { style: 'sand', turn: 20, len: 120, w: 70, props: 'boost' });
+jump(1, { style: 'sand', w: 56 });
+road(1, { style: 'sand', len: 140, w: 80, twist: [0, 0, 4, -3] });
+curve(1, 45, 220, { style: 'sand', w: 60, props: 'barriers' });
+// 2: the sand zigzag between low barriers
+road(2, { style: 'sand', turn: -35, len: 120, w: 50, props: 'barriers' });
+road(2, { style: 'sand', turn: -40, len: 110, w: 50, props: 'barriers' });
+road(2, { style: 'sand', turn: 55, len: 110, w: 50, props: 'barriers' });
+road(2, { style: 'sand', turn: -45, len: 110, w: 50, props: 'barriers' });
+road(2, { style: 'sand', turn: 30, len: 140, dy: -4, w: 60, props: 'boost' });
+// 3: the pink zigzag between brown barriers
+road(3, { style: 'pink', len: 130, drop: -4, w: 46, props: 'barriers' });
+road(3, { style: 'pink', turn: -50, len: 100, w: 46, props: 'barriers' });
+road(3, { style: 'pink', turn: 55, len: 100, w: 46, props: 'barriers' });
+road(3, { style: 'pink', turn: -50, len: 100, w: 46, props: 'barriers' });
+road(3, { style: 'pink', turn: 45, len: 150, w: 60, props: 'boost' });
+// 4: the curving pink halfpipe with speed pads and rings, and a jump out of it
+curve(4, 60, 300, { style: 'pink', w: 72, bank: 18, props: 'rings boost' });
+curve(4, -60, 300, { style: 'pink', w: 72, bank: 18, props: 'rings' });
+road(4, { style: 'pink', len: 90, w: 70 });
+jump(4, { style: 'pink', w: 50 });
+// 5: wide light-blue checker plates, fanned out, with gaps
+road(5, { style: 'checker', len: 110, w: 120, twist: [0, 3, 0, -3] });
+road(5, { style: 'checker', turn: -20, len: 130, w: 60, props: 'boost', boostColor: 'cyan' });
+road(5, { style: 'checker', turn: 20, len: 110, w: 100, twist: [2, -2, 3, 0] });
+gap(5, 20, -4, 60);
+road(5, { style: 'checker', len: 180, w: 60, props: 'boost', boostColor: 'cyan' });
+jump(5, { style: 'checker', w: 50 });
+// 6: the lilac zigzag with dark barriers
+road(6, { style: 'lilac', len: 120, w: 70, twist: [0, 3, 0, 0], props: 'barriers' });
+road(6, { style: 'lilac', turn: -45, len: 100, w: 60, props: 'barriers' });
+road(6, { style: 'lilac', turn: 60, len: 110, w: 60, twist: [2, 0, 0, 3] });
+road(6, { style: 'lilac', turn: -50, len: 100, w: 60, props: 'barriers' });
+road(6, { style: 'lilac', turn: 35, len: 130, w: 70 });
+gap(6, 24, -6, 60);
+road(6, { style: 'lilac', len: 110, w: 60, props: 'boost' });
+// 7: the orange tunnel of teal frames
+road(7, { style: 'orange', len: 200, w: 44, props: 'frames' });
+road(7, { style: 'orange', turn: 40, len: 110, w: 50, props: 'barriers' });
+road(7, { style: 'orange', turn: -40, len: 220, w: 44, props: 'frames boost', boostColor: 'cyan' });
+road(7, { style: 'orange', len: 110, w: 60 });
+// 8: checker plates and a banked checker bend with rings
+road(8, { style: 'checker', len: 130, w: 90, twist: [0, 3, -2, 2] });
+road(8, { style: 'checker', turn: 30, len: 110, w: 100, twist: [3, 0, 0, -3] });
+gap(8, 20, -4, 60);
+road(8, { style: 'checker', turn: -30, len: 150, w: 60, props: 'boost', boostColor: 'cyan' });
+curve(8, -30, 150, { style: 'checker', w: 64, bank: 10, props: 'rings' });
+// 9: narrow pink ramps between purple barriers, with speed pads
+road(9, { style: 'pink', len: 150, w: 40, props: 'barriers boost' });
+jump(9, { style: 'pink', w: 36 });
+road(9, { style: 'pink', turn: 25, len: 150, w: 40, props: 'barriers boost' });
+curve(9, 40, 220, { style: 'pink', w: 48, bank: 12, props: 'rings' });
+// 10: orange between tall red walls and purple barriers
+road(10, { style: 'orange', turn: -20, len: 200, w: 60, props: 'walls barriers boost', boostColor: 'cyan' });
+road(10, { style: 'orange', turn: -30, len: 180, w: 60, props: 'walls barriers' });
+road(10, { style: 'orange', turn: 30, len: 180, w: 60, props: 'walls boost' });
+// 11: the last checker run and the finish
+road(11, { style: 'checker', len: 180, drop: -3, w: 56, props: 'boost', boostColor: 'cyan' });
+curve(11, 20, 110, { style: 'checker', w: 56 });
+PATH.push({ stage: 11, kind: 'road', style: 'checker', len: 220, w: 90, finish: true });
+
+// Long roads are cut into separate plates, as in the reference: each plate rises into a little lip at
+// its end and the next one starts lower, past a short gap, so an offroad truck hops from plate to plate.
+const PLATE = 70;          // about this long
+const PLATE_GAP = 5;
+const PLATE_KICK = 2.5;    // lip at the end of a plate / step down to the next
+// Each plate of a long road is set a little off the line of the last one (a few degrees left or
+// right, its step down a bit deeper or shallower), so a run of plates never lies in one straight row.
+const PLATE_WIGGLE = 9;    // degrees
+function plates(path) {
+  const out = [];
+  let seed = 7, carry = 0;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (const p of path) {
+    const n = p.kind === 'road' && !p.finish && !p.curve && !p.single ? Math.round(p.len / PLATE) : 1;
+    if (n < 2) {
+      // straighten out what the last plates left over
+      out.push(carry && p.kind === 'road' ? { ...p, turn: (p.turn || 0) - carry } : p);
+      if (p.kind === 'road') carry = 0;
+      continue;
+    }
+    const len = (p.len - PLATE_GAP * (n - 1)) / n;
+    const dy = (p.dy || 0) / n;
+    let off = 0;
+    for (let k = 0; k < n; k++) {
+      const want = k === 0 ? 0 : (k % 2 ? 1 : -1) * PLATE_WIGGLE * (0.6 + rand() * 0.8);
+      const step = k === 0 ? 0 : PLATE_KICK * (0.6 + rand() * 1.0);
+      const piece = { ...p, len, dy: dy + (k < n - 1 ? PLATE_KICK : 0), drop: k === 0 ? p.drop : -step, plate: k };
+      piece.turn = k === 0 ? (p.turn || 0) - carry : want - off;
+      if (k === 0) carry = 0;
+      off = want;
+      out.push(piece);
+      if (k < n - 1) out.push({ stage: p.stage, kind: 'gap', len: PLATE_GAP, w: p.w, plateGap: true });
+    }
+    carry = off;
+  }
+  return out;
+}
 
 function buildCourse() {
   let x = 0, z = -WORLD.plazaHalf, y = 0, head = 0, acc = 0;
-  const segs = PATH.map((p, i) => {
+  const segs = plates(PATH).map((p, i) => {
     head += ((p.turn || 0) * Math.PI) / 180;
     const dx = Math.sin(head), dz = -Math.cos(head);
+    y += p.drop || 0;
     const a = { x, z, y };
     x += dx * p.len; z += dz * p.len; y += p.dy || 0;
     const seg = { ...p, i, head, dx, dz, a, b: { x, z, y }, start: acc };
@@ -105,13 +208,41 @@ export function segCorners(s, inset = 0) {
   return [pt(s.a, s.ma, -1), pt(s.a, s.ma, 1), pt(s.b, s.mb, 1), pt(s.b, s.mb, -1)];
 }
 
+// Halfpipe lift of a segment's top at a sideways offset from its centre line.
+// bankFlat: flat wings angled up instead of a curved halfpipe wall.
+export function bankLift(s, side) {
+  if (!s.bank) return 0;
+  const k = Math.min(1, Math.max(0, Math.abs(side) / (s.w / 2) - 0.5) / 0.5);
+  return s.bank * (s.bankFlat ? k : k * k);
+}
+
+// Height of a segment's top at t (0..1 along it) and side (offset from its centre line, + = right):
+// its slope, its lean and its halfpipe walls.
+export function segTop(s, t, side) {
+  let y = s.a.y + (s.b.y - s.a.y) * t + bankLift(s, side);
+  if (s.twist) {
+    const u = Math.max(0, Math.min(1, side / s.w + 0.5));
+    const [la, ra, lb, rb] = s.twist;
+    y += (la + (ra - la) * u) * (1 - t) + (lb + (rb - lb) * u) * t;
+  }
+  return y;
+}
+
+// t and side of (x, z) on a segment
+export function segLocal(s, x, z) {
+  return {
+    t: Math.max(0, Math.min(1, ((x - s.a.x) * s.dx + (z - s.a.z) * s.dz) / s.len)),
+    side: (x - s.a.x) * -s.dz + (z - s.a.z) * s.dx,
+  };
+}
+
 // Height of a segment's top under (x, z), or null if outside it.
 export function segHeight(s, x, z) {
   if (s.kind === 'gap') return null;
   const c = segCorners(s);
   if (!insideQuad(c, x, z)) return null;
-  const t = Math.max(0, Math.min(1, ((x - s.a.x) * s.dx + (z - s.a.z) * s.dz) / s.len));
-  return s.a.y + (s.b.y - s.a.y) * t;
+  const { t, side } = segLocal(s, x, z);
+  return segTop(s, t, side);
 }
 
 export function insideQuad(c, x, z) {
@@ -133,7 +264,7 @@ export function courseLocate(x, z, y = 0) {
   let best = null;
   for (const s of COURSE.segs) {
     const t = Math.max(0, Math.min(1, ((x - s.a.x) * s.dx + (z - s.a.z) * s.dz) / s.len));
-    const px = s.a.x + s.dx * s.len * t, pz = s.a.z + s.dz * s.len * t, py = s.a.y + (s.b.y - s.a.y) * t;
+    const px = s.a.x + s.dx * s.len * t, pz = s.a.z + s.dz * s.len * t, py = segTop(s, t, 0);
     const d = Math.hypot(x - px, z - pz) + Math.abs(y - py) * 0.5;
     if (!best || d < best.d) best = { d, seg: s, dist: s.start + s.len * t, side: Math.hypot(x - px, z - pz) };
   }
@@ -157,7 +288,7 @@ export function stageAt(dist) {
 export function checkpoint(stage) {
   const s = COURSE.segs[STAGES[Math.max(0, Math.min(STAGES.length - 1, stage))].first];
   const d = Math.min(14, s.len / 3);
-  return { x: s.a.x + s.dx * d, z: s.a.z + s.dz * d, y: s.a.y + ((s.b.y - s.a.y) * d) / s.len + 1, ry: Math.atan2(s.dx, s.dz) };
+  return { x: s.a.x + s.dx * d, z: s.a.z + s.dz * d, y: segTop(s, d / s.len, 0) + 1, ry: Math.atan2(s.dx, s.dz) };
 }
 
 // bar position 0..1: every stage has the same width on the bar
@@ -179,7 +310,7 @@ export const POTIONS = [0.06, 0.15, 0.24, 0.33, 0.42, 0.52, 0.61, 0.7, 0.8, 0.9]
     id: i,
     x: s.a.x + s.dx * s.len * t - s.dz * side,
     z: s.a.z + s.dz * s.len * t + s.dx * side,
-    y: s.a.y + (s.b.y - s.a.y) * t,
+    y: segTop(s, t, side),
   };
 });
 export const POTION_RADIUS = 7;
