@@ -113,6 +113,34 @@ function wheelFaceTexture() {
   return canvasTexture(c);
 }
 
+// gold sunburst: soft radial rays from a bright centre, fading out
+function raysTexture() {
+  const N = 512, c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d');
+  const cx = N / 2;
+  const n = 18;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2, w = (Math.PI / n) * 0.55;
+    const gr = g.createRadialGradient(cx, cx, N * 0.12, cx, cx, N / 2);
+    gr.addColorStop(0, 'rgba(255,236,140,0.95)');
+    gr.addColorStop(0.5, 'rgba(255,200,60,0.55)');
+    gr.addColorStop(1, 'rgba(255,170,20,0)');
+    g.fillStyle = gr;
+    g.beginPath();
+    g.moveTo(cx, cx);
+    g.arc(cx, cx, N / 2, a - w, a + w);
+    g.closePath();
+    g.fill();
+  }
+  const halo = g.createRadialGradient(cx, cx, N * 0.2, cx, cx, N * 0.34);
+  halo.addColorStop(0, 'rgba(255,220,90,0.8)');
+  halo.addColorStop(1, 'rgba(255,200,60,0)');
+  g.fillStyle = halo;
+  g.fillRect(0, 0, N, N);
+  return canvasTexture(c);
+}
+
 const WHEEL_SCALE = 1.7;    // the giant tyre towers over the trucks
 
 function dailyWheel(scene, physics, pos) {
@@ -180,6 +208,12 @@ function dailyWheel(scene, physics, pos) {
   root.add(glow);
   const ring = hexRing(11, 8.4, 0.35, neon('#ffd21a', 0.9), 0.06);
   root.add(ring);
+  // shining gold rays all round the tyre, turning slowly
+  const rays = new THREE.Mesh(new THREE.PlaneGeometry(R * 3.6, R * 3.6), new THREE.MeshBasicMaterial({
+    map: raysTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  }));
+  rays.position.set(0, R + 1.6, -W * 0.55);
+  root.add(rays);
   root.traverse((o) => { if (o.isMesh && o !== face) o.castShadow = true; });
   physics.addBox({ x: pos.x, z: pos.z, w: 16 * WHEEL_SCALE, d: 8 * WHEEL_SCALE, rot: pos.ry || 0, top: 30 * WHEEL_SCALE, bottom: -2 });
 
@@ -196,6 +230,8 @@ function dailyWheel(scene, physics, pos) {
     update(dt, time) {
       spinner.rotation.z = Math.sin(time * 0.6) * 0.03;
       glow.material.opacity = 0.7 + Math.sin(time * 3) * 0.15;
+      rays.rotation.z = time * 0.25;
+      rays.material.opacity = 0.85 + Math.sin(time * 2.2) * 0.15;
       if (spin) {
         spin.t = Math.min(spin.dur, spin.t + dt);
         const k = 1 - Math.pow(1 - spin.t / spin.dur, 3);
@@ -214,10 +250,14 @@ const PAD_LOOK = {
   more_hats: { color: '#1ac8f0', label: 'MORE HATS', icon: 'hats' },
 };
 
+const PAD_SCALE = 1.3;
+const PAD_TURN = (30 * Math.PI) / 180;
+
 function buffPad(scene, id, pos) {
   const look = PAD_LOOK[id];
   const root = new THREE.Group();
   root.position.set(pos.x, 0, pos.z);
+  root.scale.setScalar(PAD_SCALE);
   scene.add(root);
   const col = new THREE.Color(look.color);
   root.add(hexDisc(5.2, 0.25, plastic(col.clone().lerp(new THREE.Color('#ffffff'), 0.15), { emissive: look.color, emissiveIntensity: 0.25 })));
@@ -287,17 +327,27 @@ function showcase(scene, physics, truckId, pos) {
 // ---------------------------------------------------------------- all props
 export function buildSpawnProps(scene, physics) {
   fins(scene, physics);
-  const wp = { x: 40, z: -86, ry: -0.25 };
+  // as in the reference: the wheel stands just right of the course exit by the north edge, facing
+  // back into the plaza; the pass pads run in a row square to the wheel (straight out from its face,
+  // just to its right) towards the middle of the plaza (X2 XP nearest the wheel, More Hats last)
+  const wp = { x: 42, z: -96, ry: -0.45 };
   const wheel = dailyWheel(scene, physics, wp);
-  // the pass pads stand in a row on the wheel's right, as in the reference
   const padIds = ['x2_xp', 'x2_cash', 'nitro', 'more_hats'];
-  const rx = Math.cos(wp.ry), rz = -Math.sin(wp.ry);
-  const pads = padIds.map((id, i) => buffPad(scene, id, { x: wp.x + rx * (30 + i * 13), z: wp.z + rz * (30 + i * 13) }));
+  const rx = Math.cos(wp.ry), rz = -Math.sin(wp.ry);   // the wheel's right
+  const fx = Math.sin(wp.ry), fz = Math.cos(wp.ry);    // out of its face
+  const pads = padIds.map((id, i) => {
+    // the row turns 30 degrees out from the wheel's front, away from the course exit
+    const o = 30 + i * 18, c = Math.cos(PAD_TURN), sn = Math.sin(PAD_TURN);
+    const dx = fx * c + rx * sn, dz = fz * c + rz * sn;
+    return buffPad(scene, id, { x: wp.x + rx * 22 + dx * o, z: wp.z + rz * 22 + dz * o });
+  });
+  // the truck showcases line the north edge left of the exit, curving round the north-west corner,
+  // facing into the plaza: Dragonoid next to the exit, then Jurassic Attack, Cybertruck, Flower Power
   const shows = [
-    showcase(scene, physics, 'flower_power', { x: -48, z: -94, ry: 0.35 }),
-    showcase(scene, physics, 'cyber_beast', { x: -72, z: -90, ry: 0.45 }),
-    showcase(scene, physics, 'jurassic_attack', { x: -96, z: -84, ry: 0.55 }),
-    showcase(scene, physics, 'dragonoid', { x: -98, z: -54, ry: 1.1 }),
+    showcase(scene, physics, 'dragonoid', { x: -48, z: -98, ry: 0.3 }),
+    showcase(scene, physics, 'jurassic_attack', { x: -72, z: -96, ry: 0.4 }),
+    showcase(scene, physics, 'cyber_beast', { x: -94, z: -88, ry: 0.6 }),
+    showcase(scene, physics, 'flower_power', { x: -102, z: -64, ry: 0.9 }),
   ];
   return {
     wheel, pads, shows,

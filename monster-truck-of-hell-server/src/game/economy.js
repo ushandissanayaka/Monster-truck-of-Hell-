@@ -5,7 +5,7 @@
 import { markDirty } from './profiles.js';
 import {
   TRUCKS, HATS, POWERS, PASSES, CASH_PACKS, STARTER_PACK, SKIP_SKU, SPINS_SKU, WHEEL_SEGMENTS, WHEEL_COOLDOWN_MS,
-  BOOST_MS, PLAYTIME_MS, powerCost, truckById, xpForLevel, cashMul, xpMul,
+  BOOST_MS, PLAYTIME_MS, powerCost, truckById, xpForLevel, cashMul, xpMul, REWARDS, REWARD_TIERS, REWARD_COST,
 } from '../shared/gameData.js';
 
 export function ensureProfile(p) {
@@ -140,6 +140,35 @@ export function spinWheel(p, friendBoost = 0) {
   return { ok: true, index, label };
 }
 
+// spend potions on n reward rolls (1 or 5)
+export function openRewards(p, n = 1, friendBoost = 0) {
+  n = n === 5 ? 5 : 1;
+  const cost = REWARD_COST * n;
+  if ((p.potions || 0) < cost) return { ok: false, error: 'potions' };
+  p.potions -= cost;
+  const prizes = [];
+  for (let k = 0; k < n; k++) {
+    let r = Math.random() * 100, tier = REWARD_TIERS[0].id;
+    for (const t of REWARD_TIERS) { r -= t.chance; if (r <= 0) { tier = t.id; break; } }
+    const pool = REWARDS.filter((x) => x.tier === tier);
+    const it = pool[Math.floor(Math.random() * pool.length)];
+    let label = it.label;
+    if (it.cash) addCash(p, it.cash, friendBoost);
+    if (it.xp) addXp(p, it.xp);
+    if (it.spins) p.spins += it.spins;
+    if (it.truck) {
+      if (p.trucks.includes(it.truck)) { addCash(p, 2500); label = `${label} (owned: +2,500 Cash)`; } else p.trucks.push(it.truck);
+    }
+    if (it.hat) {
+      const pool2 = HATS.filter((h) => h.how === 'spin' && !p.hats.includes(h.id));
+      if (pool2.length) { const h = pool2[Math.floor(Math.random() * pool2.length)]; p.hats.push(h.id); label = h.name; } else { addCash(p, 500); label = '+500 Cash'; }
+    }
+    prizes.push({ id: it.id, label, tier });
+  }
+  markDirty();
+  return { ok: true, prizes };
+}
+
 export function claimPlaytime(p, joinedAt) {
   if (p.playtimeClaimed || p.hats.includes('propeller')) return { ok: false, error: 'claimed' };
   if (Date.now() - joinedAt < PLAYTIME_MS - 2000) return { ok: false, error: 'not_yet' };
@@ -186,7 +215,7 @@ export function profileMessage(p, extra = {}) {
   return {
     cash: p.cash, xp: p.xp, level: p.level, trucks: p.trucks, truck: p.truck, hats: p.hats, hat: p.hat,
     powers: p.powers, passes: p.passes, boosts: p.boosts, spins: p.spins, lastSpinAt: p.lastSpinAt,
-    starterPack: p.starterPack, playtimeClaimed: p.playtimeClaimed, races: p.races, wins: p.wins,
+    starterPack: p.starterPack, playtimeClaimed: p.playtimeClaimed, races: p.races, wins: p.wins, potions: p.potions,
     now: Date.now(), ...extra,
   };
 }

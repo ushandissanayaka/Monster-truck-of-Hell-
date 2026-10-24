@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { store, useStore, closeModal, openModal } from './store.js';
 import { T } from './Text.jsx';
 import { iconUrl } from '../game/util/art2d.js';
@@ -6,132 +6,95 @@ import { truckImage, drawTurning } from './truckRender.js';
 import { audio } from '../game/audio/AudioManager.js';
 import {
   TRUCKS, HATS, POWERS, PASSES, CASH_PACKS, STARTER_PACK, SPINS_SKU, WHEEL_SEGMENTS, WHEEL_COOLDOWN_MS, PLAYTIME_MS,
-  powerCost, truckById, formatShort, mmss,
+  REWARDS, REWARD_TIERS, REWARD_COST, powerCost, truckById, formatShort, mmss,
 } from '../shared/gameData.js';
 
 const Gem = () => (
   <svg className="gem" viewBox="0 0 24 24"><path d="M6 3h12l4 6-10 12L2 9z" fill="#3fd0ff" stroke="#0a3a6a" strokeWidth="1.6" strokeLinejoin="round" /><path d="M2 9h20M9 3 7 9l5 12 5-12-2-6" fill="none" stroke="#0a3a6a" strokeWidth="1.1" /></svg>
 );
 
-function GemPrice({ sku }) {
+function GemPrice({ sku, size = 24 }) {
   const price = useStore((s) => s.iapPrices[sku]);
-  return <span className="price"><Gem /><T size={24} sw={2.4}>{price != null ? String(price) : '...'}</T></span>;
+  return <span className="price"><Gem /><T size={size} sw={2.4}>{price != null ? String(price) : '...'}</T></span>;
 }
 
-function Btn({ children, color = 'green', onClick, disabled, size = 26 }) {
+function CashPrice({ value, size = 22 }) {
+  return <span className="price cash"><img src={iconUrl('cash', 64)} alt="" /><T size={size} sw={2.2} color="#7dff3a">{formatShort(value)}</T></span>;
+}
+
+function Btn({ children, color = 'green', onClick, disabled, size = 26, badge, className = '' }) {
   return (
-    <button className={`mbtn ${color}`} disabled={disabled} onClick={(e) => { e.stopPropagation(); audio.click(); onClick?.(); }}>
+    <button className={`mbtn ${color} ${className}`} disabled={disabled} onClick={(e) => { e.stopPropagation(); audio.click(); onClick?.(); }}>
       {typeof children === 'string' ? <T size={size} sw={2.6}>{children}</T> : children}
+      {badge && <span className="mbtn-badge"><T size={18} sw={2} color="#ffe31a">{badge}</T></span>}
     </button>
   );
 }
 
-function Panel({ title, color = '#ffb81a', icon, children, wide, className = '' }) {
+// Reference window: a dark see-through box, its name on a grey tag over the top-left corner and a
+// red square close button on the top-right corner.
+function Panel({ title, children, wide, className = '', side }) {
   return (
     <div className={`panel ${wide ? 'wide' : ''} ${className}`} onPointerDown={(e) => e.stopPropagation()}>
-      <div className="panel-head" style={{ '--hc': color }}>
-        {icon && <img className="panel-ico" src={icon} alt="" />}
-        <T size={44} sw={3.6} font="title">{title}</T>
-        <button className="close" onClick={() => { audio.close(); closeModal(); }} aria-label="Close">
-          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="#fff" strokeWidth="4" strokeLinecap="round" /></svg>
-        </button>
-      </div>
+      <div className="panel-tag"><T size={34} sw={3} font="title" color="#f4f4f4">{title.toUpperCase()}</T></div>
+      <button className="close" onClick={() => { audio.close(); closeModal(); }} aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="#fff" strokeWidth="4.5" strokeLinecap="round" /></svg>
+      </button>
+      {side}
       <div className="panel-body">{children}</div>
     </div>
   );
 }
 
-function Tabs({ tabs, value, onChange }) {
+// a square item tile; tone: grey | green | blue | purple | yellow | dark
+function Tile({ tone = 'grey', icon, img, label, check, onClick, tip, children, small }) {
+  const [hover, setHover] = useState(false);
   return (
-    <div className="tabs">
-      {tabs.map(([id, label]) => (
-        <button key={id} className={`tab ${value === id ? 'on' : ''}`} onClick={() => { audio.click(); onChange(id); }}><T size={24} sw={2.4}>{label}</T></button>
-      ))}
-    </div>
+    <button className={`itile ${tone} ${small ? 'small' : ''}`} onClick={(e) => { e.stopPropagation(); audio.click(); onClick?.(); }}
+      onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
+      {img && <img className="itile-img" src={img} alt="" />}
+      {icon && <img className="itile-ico" src={iconUrl(icon, 128)} alt="" />}
+      {check && <svg className="itile-check" viewBox="0 0 24 24"><path d="M4 12l5 5L20 6" fill="none" stroke="#1ec8f0" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+      {label && <span className="itile-label">{label}</span>}
+      {children}
+      {hover && tip && <span className="itile-tip">{tip}</span>}
+    </button>
   );
 }
 
-// ---------------------------------------------------------------- shop (Gems)
-function Shop({ actions, data }) {
-  const [tab, setTab] = useState(data === 'cash' ? 'cash' : 'passes');
+// ---------------------------------------------------------------- shop
+function Shop({ actions }) {
   const passes = useStore((s) => s.passes);
+  const owned = useStore((s) => s.starterPack);
+  const order = ['x2_cash', 'nitro', 'x2_xp', 'more_hats'];
+  const icon = { x2_xp: 'star', x2_cash: 'cash', nitro: 'nitro', more_hats: 'hats' };
   return (
-    <Panel title="Shop" color="#ffcc1a" icon={iconUrl('shop', 96)} wide>
-      <Tabs tabs={[['passes', 'Passes'], ['cash', 'Cash'], ['trucks', 'Trucks']]} value={tab} onChange={setTab} />
-      <div className="grid">
-        {tab === 'passes' && PASSES.map((p) => (
-          <div key={p.id} className="card" style={{ '--cc': p.color }}>
-            <img className="card-ico" src={iconUrl({ x2_xp: 'star', x2_cash: 'cash', nitro: 'nitro', more_hats: 'hats', vip: 'star' }[p.id], 128)} alt="" />
-            <T size={30} sw={3} color={p.color}>{p.name}</T>
-            <span className="card-desc">{p.desc}</span>
-            {passes[p.id] ? <Btn color="grey" disabled>Owned</Btn> : <Btn onClick={() => actions.purchase(p.sku)}><GemPrice sku={p.sku} /></Btn>}
-          </div>
+    <Panel title="Shop" className="shop" side={(
+      <div className="shop-cash">
+        {CASH_PACKS.map((p, i) => (
+          <button key={p.id} className="cash-pack" onClick={(e) => { e.stopPropagation(); audio.click(); actions.purchase(p.sku); }}>
+            <span className="cash-pile">{Array.from({ length: i + 1 }, (_, k) => <img key={k} src={iconUrl('cash', 96)} alt="" />)}</span>
+            <T size={24} sw={2.4} color="#7dff3a">{`$${p.cash.toLocaleString()}`}</T>
+          </button>
         ))}
-        {tab === 'cash' && CASH_PACKS.map((p, i) => (
-          <div key={p.id} className="card" style={{ '--cc': '#5af01a' }}>
-            <div className="cash-pile">{Array.from({ length: i + 1 }, (_, k) => <img key={k} src={iconUrl('cash', 128)} alt="" />)}</div>
-            <T size={30} sw={3} color="#7dff3a">{`${formatShort(p.cash)} Cash`}</T>
-            <span className="card-desc">{p.name}</span>
-            <Btn onClick={() => actions.purchase(p.sku)}><GemPrice sku={p.sku} /></Btn>
-          </div>
-        ))}
-        {tab === 'cash' && (
-          <div className="card" style={{ '--cc': '#2fe8ff' }}>
-            <img className="card-ico" src={iconUrl('ball', 128)} alt="" />
-            <T size={30} sw={3} color="#2fe8ff">3 Spins</T>
-            <span className="card-desc">Spin the Daily Wheel 3 more times</span>
-            <Btn onClick={() => actions.purchase(SPINS_SKU)}><GemPrice sku={SPINS_SKU} /></Btn>
-          </div>
-        )}
-        {tab === 'trucks' && TRUCKS.filter((t) => t.how === 'gems').map((t) => <TruckCard key={t.id} t={t} actions={actions} />)}
       </div>
-    </Panel>
-  );
-}
-
-// ---------------------------------------------------------------- items (garage + hats)
-function TruckCard({ t, actions }) {
-  const owned = useStore((s) => s.trucks.includes(t.id));
-  const equipped = useStore((s) => s.truck === t.id);
-  const cash = useStore((s) => s.cash);
-  let button;
-  if (equipped) button = <Btn color="grey" disabled>Equipped</Btn>;
-  else if (owned) button = <Btn color="blue" onClick={() => actions.equipTruck(t.id)}>Equip</Btn>;
-  else if (t.how === 'cash') button = <Btn disabled={cash < t.price} onClick={() => actions.buyTruck(t.id)}><span className="price"><img src={iconUrl('cash', 64)} alt="" /><T size={24} sw={2.4}>{formatShort(t.price)}</T></span></Btn>;
-  else if (t.how === 'gems') button = <Btn onClick={() => actions.buyTruck(t.id)}><GemPrice sku={t.sku} /></Btn>;
-  else if (t.how === 'free') button = <Btn onClick={() => actions.buyTruck(t.id)}>Claim</Btn>;
-  else if (t.how === 'pack') button = <Btn color="red" onClick={() => openModal('starter')}>Starter Pack</Btn>;
-  return (
-    <div className={`card truck-card ${equipped ? 'eq' : ''}`} style={{ '--cc': t.body }}>
-      {t.label && <span className="card-tag"><T size={18} sw={2} color="#ffe31a" font="label">{t.label}</T></span>}
-      <img className="truck-img" src={truckImage(t.id)} alt="" />
-      <T size={26} sw={2.6}>{t.name}</T>
-      <span className="card-desc">{`Speed x${t.speed.toFixed(2)}`}</span>
-      {button}
-    </div>
-  );
-}
-
-function Items({ actions }) {
-  const [tab, setTab] = useState('trucks');
-  const hats = useStore((s) => s.hats);
-  const hat = useStore((s) => s.hat);
-  return (
-    <Panel title="Items" color="#3fd0ff" icon={truckImage('green_goblin')} wide>
-      <Tabs tabs={[['trucks', 'Trucks'], ['hats', 'Hats']]} value={tab} onChange={setTab} />
-      <div className="grid">
-        {tab === 'trucks' && TRUCKS.map((t) => <TruckCard key={t.id} t={t} actions={actions} />)}
-        {tab === 'hats' && HATS.map((h) => {
-          const owned = hats.includes(h.id);
+    )}>
+      <button className={`starter-banner ${owned ? 'owned' : ''}`} onClick={(e) => { e.stopPropagation(); audio.click(); if (!owned) actions.purchase(STARTER_PACK.sku); }}>
+        <T size={34} sw={3}>Starter Pack</T>
+        <span className="sb-row">
+          <img className="sb-truck" src={truckImage(STARTER_PACK.truck)} alt="" />
+          <i>+</i><img src={iconUrl('hats', 96)} alt="" /><i>+</i><img src={iconUrl('cash', 96)} alt="" /><i>+</i><img src={iconUrl('star', 96)} alt="" />
+        </span>
+        <span className="sb-price">{owned ? <T size={24} sw={2.4}>Owned</T> : <GemPrice sku={STARTER_PACK.sku} />}</span>
+      </button>
+      <div className="pass-row">
+        {order.map((id) => {
+          const p = PASSES.find((x) => x.id === id);
           return (
-            <div key={h.id} className={`card ${hat === h.id ? 'eq' : ''}`} style={{ '--cc': '#ffb81a' }}>
-              <img className="truck-img" src={truckImage('big_blue', -0.75, h.id)} alt="" />
-              <T size={26} sw={2.6}>{h.name}</T>
-              <span className="card-desc">{owned ? 'Owned' : { playtime: 'Play for 10 mins', spin: 'Win it on the wheel', pass: 'More Hats pass' }[h.how]}</span>
-              {owned
-                ? (hat === h.id ? <Btn color="grey" onClick={() => actions.equipHat('')}>Take off</Btn> : <Btn color="blue" onClick={() => actions.equipHat(h.id)}>Wear</Btn>)
-                : <Btn color="grey" disabled>Locked</Btn>}
-            </div>
+            <Tile key={id} tone="dark" icon={icon[id]} tip={p.desc} onClick={() => !passes[id] && actions.purchase(p.sku)}>
+              <span className="itile-name"><T size={20} sw={2}>{p.name}</T></span>
+              <span className="itile-foot">{passes[id] ? <T size={18} sw={2} color="#7dff3a">Owned</T> : <GemPrice sku={p.sku} size={18} />}</span>
+            </Tile>
           );
         })}
       </div>
@@ -139,7 +102,64 @@ function Items({ actions }) {
   );
 }
 
-// ---------------------------------------------------------------- spin wheel
+// ---------------------------------------------------------------- garage (trucks + hats)
+function Garage({ actions }) {
+  const [tab, setTab] = useState('trucks');
+  const [confirm, setConfirm] = useState(null);
+  const s = useStore((x) => x);
+  const trucks = [...TRUCKS].sort((a, b) => (b.id === s.truck) - (a.id === s.truck));
+  const truckTile = (t) => {
+    const owned = s.trucks.includes(t.id), eq = s.truck === t.id;
+    const tone = eq ? 'dark' : owned ? 'grey' : t.how === 'gems' ? 'yellow' : t.how === 'pack' ? 'purple' : 'grey';
+    const click = () => {
+      if (eq) return;
+      if (owned) return actions.equipTruck(t.id);
+      if (t.how === 'cash') return setConfirm(t);
+      if (t.how === 'pack') return openModal('starter');
+      actions.buyTruck(t.id);
+    };
+    return (
+      <Tile key={t.id} tone={tone} img={truckImage(t.id)} check={eq} tip={t.name} onClick={click}>
+        {!owned && <span className="itile-foot">{t.how === 'cash' ? <CashPrice value={t.price} size={18} /> : t.how === 'gems' ? <GemPrice sku={t.sku} size={18} /> : t.how === 'free' ? <T size={18} sw={2} color="#ff8ae8">FREE</T> : <T size={18} sw={2} color="#ffe31a">★ Pack</T>}</span>}
+      </Tile>
+    );
+  };
+  const hatTile = (h) => {
+    const owned = s.hats.includes(h.id), eq = s.hat === h.id;
+    return (
+      <Tile key={h.id} tone={eq ? 'dark' : owned ? 'blue' : h.how === 'pass' ? 'yellow' : 'purple'} img={truckImage('big_blue', -0.75, h.id)} check={eq} tip={h.name}
+        onClick={() => owned && actions.equipHat(eq ? '' : h.id)}>
+        {!owned && <span className="itile-foot"><T size={16} sw={2} color="#fff">{{ playtime: '10 min', spin: 'Spin!', pass: 'Pass' }[h.how]}</T></span>}
+      </Tile>
+    );
+  };
+  return (
+    <Panel title="Garage" className="garage" side={(
+      <>
+        <div className="rail">
+          {[['trucks', truckImage('big_blue')], ['hats', iconUrl('hats', 96)]].map(([id, src]) => (
+            <button key={id} className={`rail-btn ${tab === id ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); audio.click(); setTab(id); }}><img src={src} alt="" /></button>
+          ))}
+        </div>
+        <button className="unlock-all" onClick={(e) => { e.stopPropagation(); audio.click(); openModal('shop'); }}>
+          <img src={iconUrl('star', 128)} alt="" /><T size={22} sw={2.2}>Unlock All!</T>
+        </button>
+      </>
+    )}>
+      <div className="tile-grid">{tab === 'trucks' ? trucks.map(truckTile) : HATS.map(hatTile)}</div>
+      {confirm && (
+        <div className="confirm" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="panel-tag small"><T size={24} sw={2.4} font="title">{confirm.name}</T></div>
+          <button className="close small" onClick={() => setConfirm(null)} aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="#fff" strokeWidth="4.5" strokeLinecap="round" /></svg></button>
+          <T size={22} sw={2.2}>{`Are you sure you want\nto buy ${confirm.name}?`}</T>
+          <Btn color="blue" disabled={s.cash < confirm.price} onClick={() => { actions.buyTruck(confirm.id); setConfirm(null); }}><CashPrice value={confirm.price} size={24} /></Btn>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------- spin wheel (no window, as in the reference)
 function Wheel({ actions, data }) {
   const lastSpinAt = useStore((s) => s.lastSpinAt);
   const spins = useStore((s) => s.spins);
@@ -161,9 +181,10 @@ function Wheel({ actions, data }) {
   const n = WHEEL_SEGMENTS.length;
   const R = 200;
   return (
-    <Panel title="Daily Wheel" color="#ff5a36" icon={iconUrl('ball', 96)} wide>
-      <div className="wheel-row">
+    <div className="spin-pop" onPointerDown={(e) => e.stopPropagation()}>
+      <button className="close spin-close" onClick={() => { audio.close(); closeModal(); }} aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="#fff" strokeWidth="4.5" strokeLinecap="round" /></svg></button>
       <div className="wheel-wrap">
+        <div className="wheel-tyre" />
         <svg className="wheel-svg" viewBox="-210 -210 420 420" style={{ transform: `rotate(${angle}deg)`, transition: data?.spinning ? 'transform 4.2s cubic-bezier(0.15,0.85,0.25,1)' : 'none' }}>
           {WHEEL_SEGMENTS.map((s, i) => {
             const a0 = ((i - 0.5) / n) * Math.PI * 2 - Math.PI / 2, a1 = ((i + 0.5) / n) * Math.PI * 2 - Math.PI / 2;
@@ -175,50 +196,105 @@ function Wheel({ actions, data }) {
               </g>
             );
           })}
-          <circle r={R} fill="none" stroke="#2a2a2d" strokeWidth="14" />
-          <circle r="46" fill="#c81e26" stroke="#7a0a10" strokeWidth="8" />
-          <image href={iconUrl('star', 96)} x="-28" y="-28" width="56" height="56" />
+          <circle r="54" fill="#c81e26" stroke="#7a0a10" strokeWidth="8" />
+          <image href={iconUrl('star', 96)} x="-32" y="-32" width="64" height="64" />
         </svg>
-        <svg className="wheel-ptr" viewBox="0 0 40 50"><path d="M4 4 H36 L20 46 Z" fill="#e4232b" stroke="#1b1b2b" strokeWidth="4" strokeLinejoin="round" /></svg>
+        <svg className="wheel-ptr" viewBox="0 0 40 60"><path d="M20 58 L4 20 A16 16 0 1 1 36 20 Z" fill="#e4232b" stroke="#6d0d10" strokeWidth="3" /></svg>
       </div>
-      <div className="wheel-side">
-        {data?.result && <T size={34} sw={3} color="#ffd21a">{`You won: ${data.result.label}!`}</T>}
-        <T size={26} sw={2.6}>{free ? 'Free spin ready!' : `Free spin in ${mmss(wait / 1000)}`}</T>
-        <T size={24} sw={2.4} color="#2fe8ff">{`Extra spins: ${spins}`}</T>
-        <Btn disabled={data?.spinning || (!free && spins <= 0)} onClick={actions.spin} size={34}>{free ? 'SPIN FREE!' : 'SPIN'}</Btn>
-        <Btn color="blue" onClick={() => actions.purchase(SPINS_SKU)}><span className="price"><T size={24} sw={2.4}>+3 Spins</T><GemPrice sku={SPINS_SKU} /></span></Btn>
+      <T size={34} sw={3}>{data?.result ? `You won: ${data.result.label}!` : free ? 'Free spin available' : `Free spin in ${mmss(wait / 1000)}`}</T>
+      <Btn color="yellow" className="spin-big" disabled={data?.spinning || (!free && spins <= 0)} onClick={actions.spin} size={34} badge={`x${free ? spins + 1 : spins}`}>Spin</Btn>
+      <div className="spin-buy">
+        <span><Btn color="green" onClick={() => actions.purchase(SPINS_SKU)}><GemPrice sku={SPINS_SKU} /></Btn><T size={18} sw={2} color="#7dff3a">+3</T></span>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- powers (Cash upgrades), as tiles
+function Powers({ actions }) {
+  const powers = useStore((s) => s.powers);
+  const cash = useStore((s) => s.cash);
+  const tone = { engine: 'red', accel: 'yellow', nitro: 'purple', jump: 'blue' };
+  return (
+    <Panel title="Powers" className="powers-pop">
+      <div className="tile-grid four">
+        {POWERS.map((p) => {
+          const lvl = powers[p.id] || 0;
+          const cost = powerCost(p, lvl);
+          const max = lvl >= p.max;
+          return (
+            <Tile key={p.id} tone={tone[p.id]} icon={{ engine: 'flame', accel: 'bolt', nitro: 'nitro', jump: 'jump' }[p.id]}
+              tip={`${p.name}: ${p.desc}`} onClick={() => !max && cash >= cost && actions.buyPower(p.id)}>
+              <span className="itile-name"><T size={18} sw={2}>{`${p.name} ${lvl}/${p.max}`}</T></span>
+              <span className="itile-foot">{max ? <T size={18} sw={2} color="#ffe31a">MAX</T> : <CashPrice value={cost} size={18} />}</span>
+            </Tile>
+          );
+        })}
       </div>
+      <span className="pop-note">Upgrade your truck with Cash!</span>
     </Panel>
   );
 }
 
-// ---------------------------------------------------------------- powers (Cash upgrades)
-function Powers({ actions }) {
-  const powers = useStore((s) => s.powers);
-  const cash = useStore((s) => s.cash);
+// ---------------------------------------------------------------- rewards: spend potions on a roll
+function Rewards({ actions }) {
+  const bank = useStore((s) => s.potionBank);
+  const tone = { common: 'green', rare: 'blue', epic: 'purple', legendary: 'yellow' };
   return (
-    <Panel title="Powers" color="#c040ff" icon={iconUrl('flame', 96)} wide>
-      <div className="powers">
-        {POWERS.map((p) => {
-          const lvl = powers[p.id] || 0;
-          const cost = powerCost(p, lvl);
+    <Panel title="Rewards" className="rewards">
+      <div className="tile-grid five">
+        {REWARDS.map((r) => <Tile key={r.id} tone={tone[r.tier]} icon={r.icon} tip={r.label} small />)}
+      </div>
+      <div className="odds">
+        {REWARD_TIERS.map((t) => <span key={t.id} style={{ '--tc': t.color }}><T size={18} sw={2}>{`${t.chance}%`}</T></span>)}
+      </div>
+      <div className="roll-row">
+        <Btn color="cyan" badge="x1" disabled={bank < REWARD_COST} onClick={() => actions.openRewards(1)}>
+          <span className="price"><img src={iconUrl('potion', 64)} alt="" /><T size={24} sw={2.4}>{String(REWARD_COST)}</T></span>
+        </Btn>
+        <Btn color="magenta" badge="x5" disabled={bank < REWARD_COST * 5} onClick={() => actions.openRewards(5)}>
+          <span className="price"><img src={iconUrl('potion', 64)} alt="" /><T size={24} sw={2.4}>{String(REWARD_COST * 5)}</T></span>
+        </Btn>
+      </div>
+      <span className="pop-note">{`Collect potions around the map! You have ${bank}`}</span>
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------- "You unlocked:" with confetti
+function Confetti({ count = 90 }) {
+  const bits = useMemo(() => Array.from({ length: count }, (_, i) => ({
+    left: Math.random() * 100, delay: Math.random() * 1.2, dur: 1.8 + Math.random() * 1.6, rot: Math.random() * 360,
+    color: ['#ff4fc0', '#ffd21a', '#1ec8f0', '#7dff3a', '#b02ee0', '#ffffff'][i % 6], w: 8 + Math.random() * 8,
+  })), [count]);
+  return (
+    <div className="confetti">
+      {bits.map((b, i) => <i key={i} style={{ left: `${b.left}%`, animationDelay: `${b.delay}s`, animationDuration: `${b.dur}s`, background: b.color, width: b.w, height: b.w * 0.5, '--r': `${b.rot}deg` }} />)}
+    </div>
+  );
+}
+
+function Unlocked({ data }) {
+  const prizes = data?.prizes || [];
+  const tone = { common: 'green', rare: 'blue', epic: 'purple', legendary: 'yellow' };
+  useEffect(() => { audio.win(); }, []);
+  return (
+    <div className="unlocked" onPointerDown={(e) => e.stopPropagation()}>
+      <Confetti />
+      <T size={44} sw={3.6}>You unlocked:</T>
+      <div className="unlocked-row">
+        {prizes.map((p, i) => {
+          const r = REWARDS.find((x) => x.id === p.id);
           return (
-            <div key={p.id} className="power-row" style={{ '--cc': p.color }}>
-              <img src={iconUrl({ engine: 'flame', accel: 'bolt', nitro: 'nitro', jump: 'jump' }[p.id], 96)} alt="" />
-              <div className="power-info">
-                <T size={30} sw={3} color={p.color}>{p.name}</T>
-                <span className="card-desc">{p.desc}</span>
-                <div className="pips">{Array.from({ length: p.max }, (_, i) => <i key={i} className={i < lvl ? 'on' : ''} />)}</div>
-              </div>
-              {lvl >= p.max
-                ? <Btn color="grey" disabled>MAX</Btn>
-                : <Btn disabled={cash < cost} onClick={() => actions.buyPower(p.id)}><span className="price"><img src={iconUrl('cash', 64)} alt="" /><T size={24} sw={2.4}>{formatShort(cost)}</T></span></Btn>}
+            <div key={i} className="unlocked-item" style={{ animationDelay: `${i * 0.12}s` }}>
+              <Tile tone={tone[p.tier]} icon={r?.icon || 'star'} />
+              <T size={20} sw={2}>{p.label}</T>
             </div>
           );
         })}
       </div>
-    </Panel>
+      <Btn color="cyan" onClick={() => closeModal()} size={30}>Claim</Btn>
+    </div>
   );
 }
 
@@ -348,7 +424,7 @@ function SignIn({ actions, data }) {
   );
 }
 
-const VIEWS = { shop: Shop, items: Items, wheel: Wheel, powers: Powers, starter: Starter, truck: TruckOffer, pass: PassOffer, playtime: Playtime, settings: Settings, signin: SignIn };
+const VIEWS = { shop: Shop, items: Garage, wheel: Wheel, powers: Powers, rewards: Rewards, unlocked: Unlocked, starter: Starter, truck: TruckOffer, pass: PassOffer, playtime: Playtime, settings: Settings, signin: SignIn };
 
 export function Modals({ actions }) {
   const modal = useStore((s) => s.modal);

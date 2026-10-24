@@ -156,6 +156,33 @@ class AudioManager {
     mod.stop(t + dur + 0.05);
   }
 
+  // brassy note: a sawtooth through a filter that opens as it is blown, then closes
+  brass(freq, dur = 0.3, gain = 0.1, delay = 0) {
+    const ctx = this.sfxReady();
+    if (!ctx) return;
+    const t = ctx.currentTime + delay;
+    const o = ctx.createOscillator(), o2 = ctx.createOscillator();
+    o.type = o2.type = 'sawtooth';
+    o.frequency.value = freq;
+    o2.frequency.value = freq * 1.006;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.Q.value = 1.5;
+    f.frequency.setValueAtTime(500, t);
+    f.frequency.exponentialRampToValueAtTime(Math.min(9000, freq * 6), t + 0.06);
+    f.frequency.exponentialRampToValueAtTime(Math.max(400, freq * 2), t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.03);
+    g.gain.setValueAtTime(gain * 0.8, t + dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(f);
+    o2.connect(f);
+    f.connect(g).connect(this.master);
+    o.start(t); o2.start(t);
+    o.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
+  }
+
   chord(freqs, dur, type, gain, delay = 0) {
     for (const f of freqs) this.tone(f, dur, type, gain, 0, delay);
   }
@@ -202,16 +229,57 @@ class AudioManager {
     this.sparkle(5, 2093, 0.06, 0.42);
   }
 
-  // finished a race in time
+  // crossed the finish line: a snare roll, a brass fanfare with a cymbal crash, the crowd cheering and
+  // confetti cannons popping
   victory() {
-    this.duck(3);
-    const notes = [392, 523, 659, 784];
-    notes.forEach((f, i) => this.tone(f, 0.14, 'square', 0.1, 0, i * 0.12));
-    this.tone(784, 0.14, 'square', 0.1, 0, 0.6);
-    this.chord([523, 659, 784, 1046], 1.2, 'sawtooth', 0.045, 0.78);
-    this.chord([523, 659, 784, 1046], 1.2, 'triangle', 0.09, 0.78);
-    this.noise(1.4, { filter: 'highpass', freq: 5000, gain: 0.08, delay: 0.78 });
-    this.sparkle(10, 2093, 0.07, 0.8);
+    this.duck(4.5);
+    for (let i = 0; i < 14; i++) this.noise(0.06, { filter: 'bandpass', freq: 2200, q: 0.7, gain: 0.05 + i * 0.008, delay: i * 0.045 });
+    const fan = [[392, 0.65, 0.16], [523, 0.8, 0.16], [659, 0.95, 0.16], [784, 1.1, 0.3], [659, 1.42, 0.14], [784, 1.58, 0.9]];
+    for (const [f, at, d] of fan) { this.brass(f, d, 0.09, at); this.brass(f / 2, d, 0.05, at); }
+    this.chord([523, 659, 784, 1046], 1.6, 'triangle', 0.07, 1.58);
+    this.noise(2.2, { filter: 'highpass', freq: 4500, gain: 0.16, delay: 0.62 });          // cymbal
+    this.tone(70, 0.5, 'sine', 0.4, -30, 0.62);                                            // kick
+    this.noise(2.8, { filter: 'bandpass', freq: 1100, q: 0.4, gain: 0.12, delay: 0.7 });   // crowd
+    this.noise(2.4, { filter: 'bandpass', freq: 2400, q: 0.6, gain: 0.06, delay: 0.9 });
+    for (let i = 0; i < 6; i++) this.noise(0.09, { filter: 'highpass', freq: 1500, gain: 0.3, delay: 0.62 + i * 0.17 + Math.random() * 0.08 });
+    this.sparkle(14, 2093, 0.06, 1.6);
+  }
+
+  // checkpoint reached: a short bright winning jingle
+  checkpoint() {
+    this.duck(1.8);
+    [523, 659, 784, 1046].forEach((f, i) => this.brass(f, 0.16, 0.08, i * 0.07));
+    for (const f of [523, 659, 784, 1046]) this.brass(f, 0.9, 0.05, 0.3);
+    this.bell(2093, 1.0, 0.07, 0.3, 2);
+    this.noise(0.8, { filter: 'highpass', freq: 6000, gain: 0.07, delay: 0.3 });
+    this.sparkle(7, 2093, 0.05, 0.34);
+  }
+
+  // speed pad, pink ring or nitro: a pop and a long rushing hiss rising in pitch
+  nitro() {
+    this.noise(0.07, { filter: 'bandpass', freq: 1600, q: 3, gain: 0.3 });
+    this.noise(1.1, { filter: 'highpass', freq: 900, sweepTo: 7000, gain: 0.16 });
+    this.noise(0.6, { filter: 'lowpass', freq: 500, gain: 0.18 });
+    this.tone(160, 0.7, 'sawtooth', 0.05, 700, 0.03);
+  }
+
+  // hit a red hazard: a metal smash, then a sad falling tone
+  crash() {
+    this.duck(1.5);
+    this.noise(0.45, { filter: 'bandpass', freq: 1800, q: 0.8, gain: 0.4 });
+    this.noise(0.6, { filter: 'lowpass', freq: 260, gain: 0.45 });
+    this.tone(60, 0.4, 'sine', 0.4, -25);
+    [740, 1110, 1663, 2490].forEach((f, i) => this.tone(f, 0.35 + i * 0.1, 'square', 0.035, -f * 0.05, i * 0.02));
+    this.tone(440, 0.9, 'sawtooth', 0.06, -330, 0.3);
+  }
+
+  // falling off the course: a long whistle down...
+  fallWhistle() { this.tone(1500, 2.2, 'sine', 0.07, -1250); this.noise(2.2, { filter: 'bandpass', freq: 400, sweepTo: 1600, gain: 0.08 }); }
+  // ...and the splash into the lava
+  lavaDeath() {
+    this.noise(1.3, { filter: 'highpass', freq: 2500, gain: 0.2 });
+    this.noise(0.9, { filter: 'lowpass', freq: 180, gain: 0.45 });
+    this.tone(55, 0.7, 'sine', 0.35, -20);
   }
 
   hatch(rarity = 'Common') {
@@ -254,7 +322,23 @@ class AudioManager {
   }
 
   // ---- movement
-  jump() { this.tone(330, 0.14, 'sine', 0.12, 220); }
+  // Space bounce: the springs letting go
+  jump() {
+    this.tone(220, 0.22, 'triangle', 0.14, 520);
+    this.tone(110, 0.18, 'sine', 0.12, 80);
+    this.noise(0.25, { freq: 500, sweepTo: 2500, gain: 0.06 });
+  }
+  // flying off a ramp: a rush of air
+  launch() {
+    this.noise(0.9, { freq: 300, sweepTo: 2600, q: 0.7, gain: 0.16 });
+    this.tone(90, 0.5, 'sine', 0.12, 60);
+  }
+  // a hard landing: a thump of the tyres and a clank of the suspension
+  land() {
+    this.tone(85, 0.28, 'sine', 0.4, -45);
+    this.noise(0.25, { filter: 'lowpass', freq: 320, gain: 0.3 });
+    this.tone(1300, 0.06, 'square', 0.035, -300, 0.02);
+  }
   // checkpoint lightning: a crack and a rolling rumble
   thunder() {
     this.noise(0.25, { filter: 'highpass', freq: 1800, gain: 0.18 });
@@ -353,9 +437,9 @@ class AudioManager {
     w.band.frequency.setTargetAtTime(160 + 650 * speed01, t, 0.3);
   }
 
-  // motorcycle: a soft purr that rises with speed while moving; on the race track it is fuller so it
-  // can be heard over the music and the wind
-  engine(on, speed01, racing = false) {
+  // monster truck V8: a lumpy idle, revving up through four gears with speed (a dip at each shift),
+  // growling harder on the throttle; loud enough to be heard over the music and the wind
+  engine(on, speed01, racing = false, throttle = 0) {
     const ctx = this.ctx;
     if (!ctx) return;
     on = on && this.sfxOn;
@@ -363,33 +447,69 @@ class AudioManager {
     if (!this.eng) {
       const out = ctx.createGain();
       out.gain.value = 0;
-      const trem = ctx.createGain(); // the "putt-putt" wobble
-      trem.gain.value = 0.75;
-      const lfo = ctx.createOscillator();
-      const lfoDepth = ctx.createGain();
-      lfoDepth.gain.value = 0.25;
-      lfo.connect(lfoDepth).connect(trem.gain);
+      // the cylinders: two detuned saws and a sub square, driven hard into a soft clip
+      const a = ctx.createOscillator(), b = ctx.createOscillator(), c = ctx.createOscillator();
+      a.type = 'sawtooth';
+      b.type = 'sawtooth';
+      c.type = 'square';
+      const mix = ctx.createGain();
+      mix.gain.value = 0.5;
+      const clip = ctx.createWaveShaper();
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < 1024; i++) curve[i] = Math.tanh(((i / 1023) * 2 - 1) * 3);
+      clip.curve = curve;
       const f = ctx.createBiquadFilter();
       f.type = 'lowpass';
-      const a = ctx.createOscillator(), b = ctx.createOscillator();
-      a.type = 'triangle';
-      b.type = 'sine';
-      a.connect(f);
-      b.connect(f);
-      f.connect(trem).connect(out).connect(this.master);
-      a.start();
-      b.start();
-      lfo.start();
-      this.eng = { out, f, a, b, lfo };
+      f.Q.value = 1.4;
+      // the lope: each firing pulse a little louder than the last, at half the firing rate
+      const lope = ctx.createGain();
+      lope.gain.value = 0.7;
+      const lfo = ctx.createOscillator();
+      const lfoDepth = ctx.createGain();
+      lfoDepth.gain.value = 0.3;
+      lfo.connect(lfoDepth).connect(lope.gain);
+      a.connect(mix); b.connect(mix); c.connect(mix);
+      mix.connect(clip).connect(f).connect(lope).connect(out);
+      // exhaust roar: noise around the firing rate, louder on the throttle
+      const ns = ctx.createBufferSource();
+      ns.buffer = noiseBuffer(ctx);
+      ns.loop = true;
+      const nf = ctx.createBiquadFilter();
+      nf.type = 'bandpass';
+      nf.Q.value = 1.2;
+      const ng = ctx.createGain();
+      ng.gain.value = 0;
+      ns.connect(nf).connect(ng).connect(out);
+      out.connect(this.master);
+      for (const o of [a, b, c, lfo, ns]) o.start();
+      this.eng = { out, f, a, b, c, lfo, lfoDepth, nf, ng, gear: 0 };
     }
     const t = ctx.currentTime, e = this.eng;
-    const hz = 55 + (racing ? 95 : 70) * speed01;
-    const level = racing ? 0.035 + 0.045 * speed01 : 0.012 + 0.02 * speed01;
-    e.out.gain.setTargetAtTime(on ? level : 0, t, 0.2);
-    e.a.frequency.setTargetAtTime(hz, t, 0.2);
-    e.b.frequency.setTargetAtTime(hz * 0.5, t, 0.2);
-    e.lfo.frequency.setTargetAtTime(14 + 30 * speed01, t, 0.2);
-    e.f.frequency.setTargetAtTime((racing ? 300 : 220) + (racing ? 800 : 500) * speed01, t, 0.2);
+    // gears: speed bands, the revs climbing through each and falling back at the shift
+    const GEARS = [0, 0.2, 0.42, 0.68, 1.4];
+    let g = 0;
+    while (g < GEARS.length - 2 && speed01 > GEARS[g + 1]) g++;
+    const k = Math.min(1, (speed01 - GEARS[g]) / (GEARS[g + 1] - GEARS[g]));
+    const rpm = racing ? (g === 0 ? 700 : 1600) + k * (g === 0 ? 2600 : 2000) + throttle * 200 : 650 + throttle * 450;
+    const shifted = racing && g > e.gear;
+    if (shifted) {
+      e.out.gain.cancelScheduledValues(t);
+      e.out.gain.setTargetAtTime(0.02, t, 0.03);              // the shift: a short lift
+    }
+    e.gear = g;
+    // big-block V8 heard from the cab: pitched an octave under the firing rate, with a sub an octave
+    // lower again and a dark filter, so it is a heavy rumble rather than a buzz
+    const fire = (rpm / 60) * 2;
+    const level = !on ? 0 : racing ? 0.035 + 0.025 * throttle + 0.015 * speed01 : 0.025 + 0.015 * throttle;
+    e.out.gain.setTargetAtTime(level, t + (shifted ? 0.08 : 0), 0.12);
+    e.a.frequency.setTargetAtTime(fire, t, 0.08);
+    e.b.frequency.setTargetAtTime(fire * 1.012, t, 0.08);
+    e.c.frequency.setTargetAtTime(fire / 2, t, 0.08);
+    e.lfo.frequency.setTargetAtTime(fire / 2, t, 0.08);
+    e.lfoDepth.gain.setTargetAtTime(0.4 - 0.25 * Math.min(1, rpm / 4000), t, 0.2);
+    e.f.frequency.setTargetAtTime(140 + rpm * 0.09 + throttle * 300, t, 0.1);
+    e.nf.frequency.setTargetAtTime(fire * 1.5, t, 0.1);
+    e.ng.gain.setTargetAtTime(on ? 0.1 + 0.3 * throttle : 0, t, 0.1);
   }
 }
 

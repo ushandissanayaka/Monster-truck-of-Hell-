@@ -1,5 +1,5 @@
-// Background music: three songs in a loop. Each plays for 2 minutes, then 5 seconds of silence,
-// then the next one. Put your own songs in public/audio/music/track1.mp3 .. track3.mp3; a missing
+// Background music: the songs in a loop. Each plays for 2 minutes, then 5 seconds of silence,
+// then the next one. Put your own songs in public/audio/music/track1.mp3 .. track4.mp3; a missing
 // file falls back to the built-in synthesized song (songs.js).
 // Timing runs on the AudioContext clock, so the music pauses with the context (hidden tab).
 import { SONGS, SECTIONS } from './songs.js';
