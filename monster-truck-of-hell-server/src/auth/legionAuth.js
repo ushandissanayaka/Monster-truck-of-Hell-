@@ -1,9 +1,9 @@
 // Verifies a Boxity (Legion) player token on the server.
-// POST https://api.bloxity.io/v1/auth/game-token/verify  -> { valid, user, carriedFrom? }
+// POST {BLOXITY_API_URL}/v1/auth/game-token/verify  -> { valid, user, carriedFrom? }
 
 import { createHash } from 'node:crypto';
+import { boxity } from '../boxityEnv.js';
 
-const API = process.env.BLOXITY_API_URL || 'https://api.bloxity.io';
 const GAME_SLUG = process.env.GAME_SLUG || 'monster-truck-of-hell';
 
 const cache = new Map(); // token -> { result, at }
@@ -16,7 +16,7 @@ export async function verifyLegionToken(token) {
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.result;
 
   try {
-    const res = await fetch(`${API}/v1/auth/game-token/verify`, {
+    const res = await fetch(`${boxity.apiUrl}/v1/auth/game-token/verify`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ gameSlug: GAME_SLUG }),

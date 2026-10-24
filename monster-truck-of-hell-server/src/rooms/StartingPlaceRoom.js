@@ -195,6 +195,14 @@ export class StartingPlaceRoom extends Room {
     st.raceMul = 1;
     this.endedLeft = RACE.endedSeconds;
     this.finishCount = 0;
+    // the player who got furthest along the course this race (shown to everyone as the race ends)
+    let winner = null;
+    for (const [sid, s] of this.sessions) {
+      const p = st.players.get(sid);
+      if (p && s.best > 0 && (!winner || s.best > winner.best)) {
+        winner = { sessionId: sid, name: p.name, avatar: p.avatar, props: p.props, best: s.best };
+      }
+    }
     for (const [sid, s] of this.sessions) {
       if (s.best > 0) s.profile.races += 1;
       s.best = 0;
@@ -205,7 +213,7 @@ export class StartingPlaceRoom extends Room {
       if (p) p.best = 0;
     }
     markDirty();
-    this.broadcast('raceEnded', {});
+    this.broadcast('raceEnded', { winner });
   }
 
   // ---------------------------------------------------------------- movement + progress

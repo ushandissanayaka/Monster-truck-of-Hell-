@@ -110,7 +110,27 @@ function TopCenter({ actions }) {
 }
 
 // ---------------------------------------------------------------- top right
+// The player as Boxity knows them: profile picture, name and Gems balance (a guest shows the Boxity
+// base character and their generated name).
+function ProfileCard() {
+  const me = useStore((s) => s.me);
+  const gems = useStore((s) => s.gems);
+  const [broken, setBroken] = useState(null);
+  if (!me) return null;
+  const src = me.pfp && broken !== me.pfp ? me.pfp : null;
+  return (
+    <div className="profile-card">
+      <span className="pc-pfp">{src ? <img src={src} alt="" draggable="false" onError={() => setBroken(me.pfp)} /> : null}</span>
+      <span className="pc-name">{me.name}</span>
+      <i className="pc-sep" />
+      <svg className="pc-gem" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6 20.1 7.3v9.4L12 21.4 3.9 16.7V7.3Z" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" /><circle cx="12" cy="12" r="3.4" fill="none" stroke="currentColor" strokeWidth="2.2" /></svg>
+      <span className="pc-gems">{formatShort(gems ?? 0)}</span>
+    </div>
+  );
+}
+
 function TopRight() {
+  const embedded = useStore((s) => s.embedded);
   const joinedAt = useStore((s) => s.joinedAt);
   const claimed = useStore((s) => s.playtimeClaimed || s.hats.includes('propeller'));
   const pack = useStore((s) => s.starterPack);
@@ -118,9 +138,15 @@ function TopRight() {
   const left = Math.max(0, (joinedAt + PLAYTIME_MS - now) / 1000);
   return (
     <>
-      <button className="gear" onClick={() => openModal('settings')} aria-label="Settings">
-        <Img src={iconUrl('gear', 96)} />
-      </button>
+      <div className="tr-row">
+        <ProfileCard />
+        {/* inside Boxity its menu holds the settings, so the game draws no settings button there */}
+        {!embedded && (
+          <button className="gear" onClick={() => openModal('settings')} aria-label="Settings">
+            <Img src={iconUrl('gear', 96)} />
+          </button>
+        )}
+      </div>
       {!pack && (
         <button className="starter" onClick={() => openModal('starter')}>
           <span className="starter-glow" />
@@ -252,6 +278,42 @@ function Victory() {
   );
 }
 
+// The death card, in the middle of the screen (Boxity's ads sit along the edges): what happened and
+// a Respawn button that counts down, then takes the truck back to the last checkpoint.
+function DeathCard({ actions }) {
+  const d = useStore((s) => s.death);
+  if (!d) return null;
+  const ready = d.left <= 0;
+  return (
+    <div className="death">
+      <div className="death-card">
+        <T size={78} sw={6} font="title" gradient="linear-gradient(180deg,#ffd0c0 0%,#ff5a3a 55%,#c41a12 100%)">{d.kind === 'hazard' ? 'SMASHED!' : 'INTO THE LAVA!'}</T>
+        <T size={30} sw={3}>{d.kind === 'hazard' ? 'You hit a red hazard' : 'Your truck fell off the track'}</T>
+        <button className={`death-btn ${ready ? 'ready' : ''}`} disabled={!ready} onClick={() => { audio.click(); actions.deathRespawn(); }}>
+          <T size={40} sw={3.4}>{ready ? 'RESPAWN' : String(d.left)}</T>
+        </button>
+        <T size={22} sw={2.4} color="#d8d8e0">Back to your last checkpoint</T>
+      </div>
+    </div>
+  );
+}
+
+// After a race: the player who got furthest along the course, in gold
+function RaceWinner() {
+  const w = useStore((s) => s.raceWinner);
+  const [broken, setBroken] = useState(null);
+  if (!w) return null;
+  const src = w.pfp && broken !== w.pfp ? w.pfp : null;
+  return (
+    <div key={w.id} className="race-winner">
+      <T size={44} sw={4} color="#ffe9a0">RACE OVER</T>
+      <span className="rw-pfp">{src ? <img src={src} alt="" draggable="false" onError={() => setBroken(w.pfp)} /> : null}</span>
+      <T size={82} sw={6} font="title" gradient="linear-gradient(180deg,#fff7c0 0%,#ffd84a 45%,#e8a514 100%)">{w.name}</T>
+      <T size={36} sw={3.4} gradient="linear-gradient(180deg,#fff3a8 0%,#ffcf2e 100%)">{w.pct >= 100 ? 'Finished first - went the furthest!' : `Went the furthest - ${w.pct}% of the track`}</T>
+    </div>
+  );
+}
+
 function Transition() {
   const t = useStore((s) => s.transition);
   if (!t) return null;
@@ -292,6 +354,8 @@ export function Hud({ game }) {
         </>
       )}
       {showFps && <div className="fps">{fps} FPS</div>}
+      {!hidden && <DeathCard actions={actions} />}
+      <RaceWinner />
       <Transition />
       <Modals actions={actions} />
       {portrait && touch && <RotateHint />}

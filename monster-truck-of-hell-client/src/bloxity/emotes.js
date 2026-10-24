@@ -3,15 +3,15 @@
 // smoothstep between keys, clamped outside the key range, looping on time % len.
 
 import * as THREE from 'three';
+import { boxityEnv } from './env.js';
 
-const API = 'https://api.bloxity.io/v1/avatar/emotes';
 let catalogue = null;
 let loading = null;
 
 export function loadEmotes() {
   if (catalogue) return Promise.resolve(catalogue);
   if (!loading) {
-    loading = fetch(API)
+    loading = fetch(`${boxityEnv().apiUrl}/v1/avatar/emotes`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => {
         const list = Array.isArray(data) ? data : data?.emotes || data?.items || [];

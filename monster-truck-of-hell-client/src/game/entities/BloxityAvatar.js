@@ -8,9 +8,11 @@ import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { WORLD } from '../../shared/gameData.js';
 import { applyEmote, getEmote } from '../../bloxity/emotes.js';
+import { boxityEnv } from '../../bloxity/env.js';
 
-export const CDN = 'https://static.bloxity.io/avatars';
-const SKIN_API = 'https://api.bloxity.io/v1/avatar/skin-texture';
+// asset CDN and skin texture API of the environment Boxity told us
+export const cdn = () => `${boxityEnv().staticUrl}/avatars`;
+const skinApi = () => `${boxityEnv().apiUrl}/v1/avatar/skin-texture`;
 
 const PART_MESH_NAMES = {
   head: 'default_head', arm_L: 'default_arm_L', arm_R: 'default_arm_R',
@@ -43,12 +45,12 @@ export function skinUrlFor(eq = {}) {
   if (isEq(eq.pantsId)) segs += `_pn${eq.pantsId}`;
   if (isEq(eq.shirtId)) segs += `_sh${eq.shirtId}`;
   if (isEq(eq.faceId)) segs += `_fc${eq.faceId}`;
-  return segs ? `${SKIN_API}/s${skin}${segs}.png` : `${CDN}/skins/${skin}.png`;
+  return segs ? `${skinApi()}/s${skin}${segs}.png` : `${cdn()}/skins/${skin}.png`;
 }
 
 let basePromise = null;
 function loadBase() {
-  if (!basePromise) basePromise = new GLTFLoader().loadAsync(`${CDN}/player.glb`);
+  if (!basePromise) basePromise = new GLTFLoader().loadAsync(`${cdn()}/player.glb`);
   return basePromise;
 }
 export function preloadAvatar() {
@@ -267,7 +269,7 @@ export class BloxityAvatar {
     if (url !== this.currentSkinUrl) {
       this.currentSkinUrl = url;
       loadPixelTexture(url)
-        .catch(() => loadPixelTexture(`${CDN}/skins/0.png`))
+        .catch(() => loadPixelTexture(`${cdn()}/skins/0.png`))
         .then((tex) => this._applySkin(tex))
         .catch(() => {});
     }
@@ -307,7 +309,7 @@ export class BloxityAvatar {
       return;
     }
     const info = PART_SLOT[slot];
-    new GLTFLoader().load(`${CDN}/parts/${info.dir}/${itemId}${info.suffix}.glb`, (gltf) => {
+    new GLTFLoader().load(`${cdn()}/parts/${info.dir}/${itemId}${info.suffix}.glb`, (gltf) => {
       let sm = null, rm = null;
       gltf.scene.traverse((c) => {
         if (c.isSkinnedMesh && !sm) sm = c;
@@ -338,8 +340,8 @@ export class BloxityAvatar {
 
   async _texturedObj(slotDir, id) {
     const [obj, tex] = await Promise.all([
-      loadObj(`${CDN}/items/${slotDir}/${id}.obj`),
-      loadPixelTexture(`${CDN}/textures/${slotDir}/${id}.png`).catch(() => null),
+      loadObj(`${cdn()}/items/${slotDir}/${id}.obj`),
+      loadPixelTexture(`${cdn()}/textures/${slotDir}/${id}.png`).catch(() => null),
     ]);
     obj.traverse((c) => {
       if (c.isMesh) {

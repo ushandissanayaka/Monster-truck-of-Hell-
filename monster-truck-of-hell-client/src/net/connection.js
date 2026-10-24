@@ -5,6 +5,7 @@
 
 import { Client } from 'colyseus.js';
 import { bloxity } from '../bloxity/bloxity.js';
+import { boxityEnv } from '../bloxity/env.js';
 import { ROOM_NAME } from '../shared/gameData.js';
 
 const HOSTING_ID = import.meta.env.VITE_BLOXITY_HOSTING_ID || '';
@@ -22,7 +23,7 @@ async function endpoint() {
 async function joinRequestedRoom(roomId, options) {
   if (isHosted()) {
     // resolve the room's pod first, a bare joinById can land on another pod
-    const res = await fetch(`https://play.bloxity.io/v1/dir/${HOSTING_ID}/list`);
+    const res = await fetch(`${boxityEnv().playUrl}/v1/dir/${HOSTING_ID}/list`);
     const data = await res.json();
     const list = Array.isArray(data) ? data : data.rooms || [];
     const hit = list.find((r) => r.roomId === roomId || r.id === roomId);

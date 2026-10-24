@@ -22,6 +22,8 @@ import {
 } from '../shared/gameData.js';
 
 const SEND_HZ = 15;
+const DEATH_SECONDS = 3;    // shortest time on the death card before Respawn works
+const WINNER_SECONDS = 3;   // the race winner's card after a race ends
 const ERRORS = {
   no_cash: 'Not enough Cash!', owned: 'You already own this', locked: 'Not unlocked yet', not_yet: 'Not ready yet!',
   max: 'Already maxed out!', claimed: 'Already claimed', gems: 'Buy it with Gems', no_spins: 'No spins left', potions: 'Collect more potions around the map!',
@@ -92,9 +94,16 @@ export class Game {
     this.cam.focus.copy(this.player.body.pos).add(new THREE.Vector3(0, 6, 0));
     if (import.meta.env.DEV) this.applyDebugView();
     this.input.onKey((code) => {
+      // Escape: close the open window, otherwise Boxity's pause menu (the game draws none of its own)
+      if (code === 'Escape') {
+        if (store.getState().modal) closeModal();
+        else bloxity.showMenu();
+        return;
+      }
       if (store.getState().modal) return;
       if (code === 'KeyE') this.interaction.trigger();
       if (code === 'KeyQ') this.actions.nitro();
+      if (this.death && (code === 'Enter' || code === 'Space')) this.respawnFromDeath();
     });
 
     this.wireBloxity();
@@ -172,7 +181,7 @@ export class Game {
 
   wireBloxity() {
     bloxity.onUser(() => {
-      store.setState({ user: bloxity.user });
+      store.setState({ user: bloxity.user, embedded: bloxity.embedded });
       this.updateMe();
       this.player.setName(bloxity.displayName(), !!store.getState().passes?.vip);
       if (this.room && this.lastToken !== bloxity.token()) this.reconnect();
@@ -193,7 +202,8 @@ export class Game {
       store.setState({ showFps: s.show_fps === 'true' });
     });
     bloxity.onPlayerEvent(({ event, data }) => {
-      if (event === 'respawn_request') this.player.respawn();
+      // Boxity's "Reset Character": instant, closing any death screen first
+      if (event === 'respawn_request') { this.endDeath(true); this.player.respawn(); }
       if (event === 'play_emote' && typeof data === 'string') this.room?.send('emote', data);
     });
     bloxity.onChat((m) => {
@@ -339,8 +349,9 @@ export class Game {
       notice(m.first ? `${m.name} finished the race! x2 speed activated!` : `${m.name} finished the race!`);
     });
     room.onMessage('victory', (v) => this.onVictory(v));
-    room.onMessage('raceEnded', () => this.onRaceEnded());
+    room.onMessage('raceEnded', (m) => this.onRaceEnded(m?.winner || null));
     room.onMessage('skip', (m) => {
+      this.endDeath(true);
       this.player.toCheckpoint(m.stage);
       this.best = Math.max(this.best, STAGES[m.stage].start);
       toast(`Skipped to stage ${m.stage + 1}!`, 'reward');
@@ -456,7 +467,9 @@ export class Game {
     },
     purchase: async (sku) => {
       if (!bloxity.available) return toast('Purchases work on bloxity.io', 'error');
-      if (!bloxity.user) return openModal('signin', { sku });
+      // Inside Boxity its toolbar handles signing in (the purchase popup asks a guest to sign in); only a
+    // page outside Boxity shows the game's own sign-in step.
+    if (!bloxity.user && !bloxity.embedded) return openModal('signin', { sku });
       if (this.purchasing) return;
       this.purchasing = true;
       try {
@@ -477,6 +490,7 @@ export class Game {
       }
     },
     respawn: () => this.player.respawn(),
+    deathRespawn: () => this.respawnFromDeath(),
     login: () => bloxity.login(),
     menu: () => bloxity.showMenu(),
     signInAndBuy: async (sku) => {
@@ -511,14 +525,16 @@ export class Game {
       this.input.joy.set(a.x, a.y);
       if (a.reset || pl.fellInLava) this.autopilot.skipAhead(pl);
     }
-    pl.update(dt, modalOpen && !this.autopilot ? NO_INPUT : this.input, this.physics);
-    if (pl.jumped) { pl.jumped = false; audio.jump(); }
-    if (pl.landed) { pl.landed = false; audio.land(); }
-    this.airSounds(pl);
-    if (pl.fellInLava) { if (!this.autopilot) this.onLava('lava'); }
-    else if (!this.autopilot && this.world.parts.course.hazardHit(pl.hazardPoints())) {
-      centerText('Smashed! Back to the checkpoint', '#ff4a3a');
-      this.onLava('hazard');
+    if (this.death) {
+      // dead: the truck stays where it was lost while the death card counts down
+      this.updateDeathUi();
+    } else {
+      pl.update(dt, modalOpen && !this.autopilot ? NO_INPUT : this.input, this.physics);
+      if (pl.jumped) { pl.jumped = false; audio.jump(); }
+      if (pl.landed) { pl.landed = false; audio.land(); }
+      this.airSounds(pl);
+      if (pl.fellInLava) { if (!this.autopilot) this.onLava('lava'); }
+      else if (!this.autopilot && this.world.parts.course.hazardHit(pl.hazardPoints())) this.onLava('hazard');
     }
     if (pl.flipped !== !!this.flipHint) {
       this.flipHint = pl.flipped;
@@ -563,17 +579,49 @@ export class Game {
   }
 
   // lost the truck (kind: 'lava' fell off, 'hazard' hit a red hazard): back to the last stage reached
+  // The local player died (kind: 'lava' fell off, 'hazard' hit a red hazard). Boxity's death screen
+  // runs its countdown (ads round the edges) and the death card's Respawn button waits for it and
+  // for DEATH_SECONDS, then takes the truck back to the last checkpoint reached (docs "Death screen").
   onLava(kind = 'lava') {
-    const pl = this.player;
-    if (this.sendingHome) return;
-    playTransition('');
+    if (this.sendingHome || this.death) return;
     if (kind === 'hazard') audio.crash();
     else audio.lavaDeath();
-    audio.teleport();
     this.fallSfx = false;
-    const stage = stageAt(this.best);
-    if (this.best <= 0) pl.respawn();
-    else pl.toCheckpoint(stage);
+    const handle = bloxity.deathShow();
+    const d = { kind, handle, boxityLeft: null, until: performance.now() + DEATH_SECONDS * 1000 };
+    this.death = d;
+    d.unsub = handle.onCountdown((n) => { d.boxityLeft = n; this.updateDeathUi(); });
+    this.updateDeathUi();
+  }
+
+  // seconds until Respawn works: our own few seconds and Boxity's countdown, whichever is longer
+  updateDeathUi() {
+    const d = this.death;
+    if (!d) return;
+    const left = Math.max(Math.ceil((d.until - performance.now()) / 1000), d.boxityLeft ?? 0, 0);
+    const cur = store.getState().death;
+    if (!cur || cur.left !== left || cur.kind !== d.kind) store.setState({ death: { kind: d.kind, left } });
+  }
+
+  // the death card's Respawn button: only once both countdowns are over (respawn() says so)
+  respawnFromDeath() {
+    const d = this.death;
+    if (!d || performance.now() < d.until || !d.handle.respawn()) return;
+    this.endDeath(false);
+    playTransition('');
+    audio.teleport();
+    if (this.best <= 0) this.player.respawn();
+    else this.player.toCheckpoint(stageAt(this.best));
+  }
+
+  // close the death card; hide: also close Boxity's death screen without a respawn (race over, reset)
+  endDeath(hide) {
+    const d = this.death;
+    if (!d) return;
+    d.unsub?.();
+    if (hide) bloxity.deathHide();
+    this.death = null;
+    store.setState({ death: null });
   }
 
   // in the air: a rush when flying off a ramp, a long whistle when falling off the course
@@ -643,13 +691,27 @@ export class Game {
     setTimeout(() => this.sendHome('Back to Spawn'), 3000);   // 3 seconds at the finish with the confetti
   }
 
-  onRaceEnded() {
-    centerText('Race ended!');
+  // The race clock ran out: everyone goes back to the spawn plaza, and for a few seconds the screen
+  // shows the player who got furthest along the course (winner: from the server, or ourselves offline).
+  onRaceEnded(winner) {
     audio.timeUp();
+    const myBest = this.best;
     this.best = 0;
     store.setState({ potions: [], stage: 0, finished: false });
     this.world.parts.course.setCollected([]);
-    if (this.player.body.pos.z < -WORLD.plazaHalf + 2) this.sendHome('Race ended!');
+    this.endDeath(true);
+    this.sendHome(winner || (!this.room && myBest > 0) ? '' : 'Race ended!');   // the winner card says it otherwise
+    if (!this.room && myBest > 0) winner = { self: true, name: bloxity.displayName(), best: myBest };
+    if (!winner) return;
+    const self = winner.self || (this.room && winner.sessionId === this.room.sessionId);
+    let pfp = bloxity.pfp();
+    if (!self) {
+      try { pfp = avatarPfpUrl(JSON.parse(winner.avatar || '{}'), JSON.parse(winner.props || '{}')); } catch { pfp = null; }
+    }
+    const pct = Math.min(100, Math.round((winner.best / finishDist()) * 100));
+    const id = Date.now();
+    setTimeout(() => store.setState({ raceWinner: { id, name: winner.name, pfp, pct, self } }), 700);
+    setTimeout(() => { if (store.getState().raceWinner?.id === id) store.setState({ raceWinner: null }); }, 700 + WINNER_SECONDS * 1000);
   }
 
   sendHome(text) {
