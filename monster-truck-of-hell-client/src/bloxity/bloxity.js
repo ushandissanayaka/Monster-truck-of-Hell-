@@ -1,6 +1,8 @@
 // Single place where the game talks to the Boxity SDK (window.Legion.SDK).
 // Everything degrades gracefully when the SDK script is blocked or missing (offline dev).
 
+import { boxityEnv } from './env.js';
+
 const GAME_SLUG = import.meta.env.VITE_GAME_SLUG || 'monster-truck-of-hell';
 
 export const SETTING_DEFAULTS = {
@@ -17,7 +19,7 @@ function sdk() {
 }
 
 // The Bloxity base character's picture (what the SDK shows for a default guest avatar).
-export const DEFAULT_PFP = 'https://static.bloxity.io/img/pfps/s0.png?width=128&quality=85&v=2';
+export const defaultPfp = () => `${boxityEnv().staticUrl}/img/pfps/s0.png?width=128&quality=85&v=2`;
 const GUEST_KEY = 'mth_guest_key';
 const GUEST_NAMES = ['Shadow', 'Comet', 'Falcon', 'Turbo', 'Blaze', 'Rapid', 'Cosmic', 'Viper', 'Neon', 'Rogue', 'Tiger', 'Hawk'];
 
@@ -38,7 +40,7 @@ export function avatarPfpUrl(eq = {}, proportions = {}) {
     const n = (v) => { const s = parseFloat(v.toFixed(4)).toString(); return s.includes('.') ? s.replace('.', 'f') : `${s}f0`; };
     key += `_hd${parts[0]}_aL${parts[1]}_aR${parts[2]}_lL${parts[3]}_lR${parts[4]}_to${parts[5]}_p${p.map(n).join('-')}`;
   }
-  return `https://static.bloxity.io/img/pfps/${key}.png?width=128&quality=85&v=2`;
+  return `${boxityEnv().staticUrl}/img/pfps/${key}.png?width=128&quality=85&v=2`;
 }
 
 // a value kept in localStorage, made once with make() (still works for the session if storage is blocked)
@@ -123,9 +125,9 @@ export const bloxity = {
     if (state.user) return null;
     try {
       const g = sdk()?.auth.getGuest?.();
-      if (g?.username) return { name: g.displayName || g.username, pfp: g.pfp || DEFAULT_PFP };
+      if (g?.username) return { name: g.displayName || g.username, pfp: g.pfp || defaultPfp() };
     } catch {}
-    return { name: localGuestName(), pfp: DEFAULT_PFP };
+    return { name: localGuestName(), pfp: defaultPfp() };
   },
   displayName() {
     const u = state.user;
@@ -134,7 +136,7 @@ export const bloxity = {
   // profile picture for the top-right card
   pfp() {
     const u = state.user;
-    return u ? u.pfp || DEFAULT_PFP : this.guest().pfp;
+    return u ? u.pfp || defaultPfp() : this.guest().pfp;
   },
   // A secret id kept in this browser, so a signed-out player's progress is saved on the server and
   // comes back next time (and moves into their account when they sign in).
@@ -174,7 +176,7 @@ export const bloxity = {
   // does), or null if the product does not exist. Read-only, no login needed.
   async iap(sku) {
     try {
-      const res = await fetch(`https://api.bloxity.io/v1/games/${encodeURIComponent(GAME_SLUG)}/iaps/${encodeURIComponent(sku)}`);
+      const res = await fetch(`${boxityEnv().apiUrl}/v1/games/${encodeURIComponent(GAME_SLUG)}/iaps/${encodeURIComponent(sku)}`);
       if (!res.ok) return null;
       const p = await res.json();
       return typeof p?.price === 'number' ? p : null;
@@ -204,6 +206,18 @@ export const bloxity = {
   inviteLink(roomId) {
     try { return sdk()?.social.getInviteFriendsLink(roomId ? { roomId } : undefined) || location.href; } catch { return location.href; }
   },
+
+  // Boxity death screen (docs "Death screen"): Boxity shows ads round the edges and runs a countdown
+  // (at least 4 s) while the game's own Respawn button waits for 0. Outside Boxity the countdown is 0
+  // at once and respawn() is true, so the same code path works everywhere.
+  deathShow() {
+    try {
+      const d = sdk()?.deathScreen?.show();
+      if (d) return d;
+    } catch {}
+    return { onCountdown(cb) { cb(0); return () => {}; }, respawn: () => true };
+  },
+  deathHide() { try { sdk()?.deathScreen?.hide(); } catch {} },
 
   showCustomizer() { try { sdk()?.avatar.showCustomizer(); } catch {} },
   showMenu() { try { sdk()?.portal.showMenu(true); } catch {} },

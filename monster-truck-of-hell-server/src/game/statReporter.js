@@ -2,6 +2,7 @@
 // Values always come from server-owned profiles, never from client packets.
 
 import { allProfiles } from './profiles.js';
+import { boxity } from '../boxityEnv.js';
 
 const DEFINITIONS = [
   { key: 'wins', label: 'Races Won', type: 'number', sortOrder: 1 },
@@ -31,7 +32,7 @@ async function flush() {
   const token = process.env.BLOXITY_REPORT_TOKEN;
   const gameId = process.env.BLOXITY_GAME_ID;
   if (!token || !gameId) return;
-  const api = process.env.BLOXITY_API_URL || 'https://api.bloxity.io';
+  const api = boxity.apiUrl;
 
   const players = allProfiles()
     .filter((p) => String(p.userId).startsWith('legion_'))
