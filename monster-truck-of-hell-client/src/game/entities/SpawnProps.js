@@ -2,12 +2,12 @@
 //  - teal fins either side of the sand ramp where the course starts
 //  - the Daily Wheel: a giant monster tyre on a stand with a coloured prize wheel in it
 //  - buff pads: hex pads with a light beam and a floating badge (X2 XP, X2 CASH, NITRO, MORE HATS)
-//  - truck showcase: trucks on neon hex rings (FREE CAR!, ON SALE, LIMITED TIME)
+//  - truck showcase: every truck on a neon hex ring (FREE CAR!, ON SALE, LIMITED TIME, its price)
 
 import * as THREE from 'three';
-import { WORLD, TRUCKS, PASSES, WHEEL_SEGMENTS, truckById } from '../../shared/gameData.js';
+import { WORLD, TRUCKS, PASSES, WHEEL_SEGMENTS, truckById, formatShort } from '../../shared/gameData.js';
 import { plastic, neon } from '../util/materials.js';
-import { box, cylinder } from '../util/geometry.js';
+import { box, cylinder, mergeStatic } from '../util/geometry.js';
 import { treadTexture, glowTexture, beamTexture } from '../util/textures.js';
 import { drawOutlinedText, canvasTexture, FONT_LABEL, FONT_UI, measure } from '../util/canvasText.js';
 import { drawIcon, drawBadge } from '../util/art2d.js';
@@ -215,6 +215,7 @@ function dailyWheel(scene, physics, pos) {
   rays.position.set(0, R + 1.6, -W * 0.55);
   root.add(rays);
   root.traverse((o) => { if (o.isMesh && o !== face) o.castShadow = true; });
+  mergeStatic(root, [spinner, prize, rays]);   // the 52 lugs and the stand in a few draws
   physics.addBox({ x: pos.x, z: pos.z, w: 16 * WHEEL_SCALE, d: 8 * WHEEL_SCALE, rot: pos.ry || 0, top: 30 * WHEEL_SCALE, bottom: -2 });
 
   let spin = null;
@@ -282,6 +283,7 @@ function buffPad(scene, id, pos) {
   const label = sprite(lc, 2.2);
   label.position.y = 5.6;
   root.add(label);
+  mergeStatic(root);
   return {
     id,
     position: new THREE.Vector3(pos.x, 0, pos.z),
@@ -309,9 +311,11 @@ function showcase(scene, physics, truckId, pos) {
   truck.object.rotation.y = pos.ry;
   root.add(truck.object);
   const sub = t.id === 'flower_power' ? 'DRIVE IN TO CLAIM IT FOR FREE' : null;
-  const label = sprite(labelCanvas({ big: t.label, small: t.name.toUpperCase(), smallFill: t.label === 'LIMITED TIME' ? '#ff3a3a' : '#ffffff', under: sub }), sub ? 6.4 : 5.4);
+  const big = t.label || (t.how === 'cash' ? `${formatShort(t.price)} CASH` : t.how === 'free' ? 'FREE' : t.how === 'pack' ? 'STARTER PACK' : 'SHOP');
+  const label = sprite(labelCanvas({ big, small: t.name.toUpperCase(), smallFill: t.label === 'LIMITED TIME' ? '#ff3a3a' : '#ffffff', under: sub }), sub ? 6.4 : 5.4);
   label.position.y = 15.5;
   root.add(label);
+  mergeStatic(root, [], [truck.object]);
   physics.addCylinder({ x: pos.x, z: pos.z, r: 8.2, top: 9, bottom: -2 });
   return {
     id: truckId,
@@ -349,6 +353,12 @@ export function buildSpawnProps(scene, physics) {
     showcase(scene, physics, 'cyber_beast', { x: -94, z: -88, ry: 0.6 }),
     showcase(scene, physics, 'flower_power', { x: -102, z: -64, ry: 0.9 }),
   ];
+  // every other truck in a row along the south edge, facing north into the plaza
+  const rest = TRUCKS.filter((t) => !shows.some((s) => s.id === t.id));
+  rest.forEach((t, i) => {
+    const x = (i - (rest.length - 1) / 2) * 32;
+    shows.push(showcase(scene, physics, t.id, { x, z: 98, ry: Math.PI }));
+  });
   return {
     wheel, pads, shows,
     update(dt, time) {

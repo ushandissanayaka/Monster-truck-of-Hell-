@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { COURSE, WORLD, POTIONS, FINISH, SPLITS, CATCHES, segCorners, segTop } from '../../shared/gameData.js';
 import { studTexture, sandTexture, curbTexture, checkerTexture, glowTexture, roadCheckerTexture, mintTexture, chevronTexture, speckleTexture, diamondTexture } from '../util/textures.js';
 import { plastic, neon } from '../util/materials.js';
-import { box, cylinder } from '../util/geometry.js';
+import { box, cylinder, meshPieces, mergeStatic } from '../util/geometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeBillboard, FONT_TITLE } from '../util/canvasText.js';
 import { studioEnv } from './MonsterTruck.js';
@@ -275,6 +275,7 @@ function curbMound(group, physics, p0, p1, n, y) {
 }
 
 const lerpP = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+const streakTmp = new THREE.Object3D();
 
 export function buildCourse(scene, physics) {
   const M = materials();
@@ -385,6 +386,7 @@ export function buildCourse(scene, physics) {
       m.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       group.add(m);
       const solid = physics.addBox({ x: p.x, z: p.z, w: len, d: 3, rot: yaw, top: p.y + 3.7, bottom: p.y - 1, block: true });
+      m.userData.dynamic = true;
       sweepers.push({ mesh: m, solid, speed: (seg.i % 2 ? 1 : -1) * (0.7 + (seg.i % 3) * 0.2), phase: seg.i });
     }
     if (seg.corner) cornerWalls(group, physics, seg, at, yaw);
@@ -426,6 +428,7 @@ export function buildCourse(scene, physics) {
         m.rotation.y = yaw;
         group.add(m);
         const solid = physics.addBox({ x: p.x, z: p.z, w, d, rot: m.rotation.y, top: p.y + h, bottom: p.y - 1 });
+        m.userData.dynamic = true;
         pushers.push({ mesh: m, solid, base: p, nx: -seg.dz, nz: seg.dx, amp: (seg.w - w) / 2 - 4, speed: 0.7 + i * 0.25, phase: i * 1.7 });
       }
     }
@@ -440,12 +443,16 @@ export function buildCourse(scene, physics) {
       const p = at(0.5, 0);
       const flag = new THREE.Group();
       flag.add(cylinder(0.25, 0.25, 9, plastic('#2b2b2e'), { y: 4.5, segments: 8 }));
-      flag.add(box(3.6, 2.2, 0.15, M.flag, { x: 1.9, y: 7.8 }));
+      const cloth = box(3.6, 2.2, 0.15, M.flag, { x: 1.9, y: 7.8 });
+      flag.add(cloth);
       flag.add(cylinder(1.2, 1.4, 0.4, plastic('#2b2b2e'), { y: 0.2, segments: 12 }));
+      mergeStatic(flag, [cloth]);
+      flag.userData.cloth = cloth;
       flag.position.set(p.x, p.y, p.z);
       flag.rotation.y = yaw + Math.PI / 2;
       flag.userData.stage = seg.stage;
       group.add(flag);
+      flag.userData.dynamic = true;
       flags.push(flag);
     }
   }
@@ -515,6 +522,7 @@ export function buildCourse(scene, physics) {
   const tt = 0.94;
   const tp = { x: f.a.x + f.dx * f.len * tt, z: f.a.z + f.dz * f.len * tt, y: f.b.y };
   const trophy = trophyMesh();
+  trophy.userData.dynamic = true;
   trophy.position.set(tp.x, tp.y, tp.z);
   trophy.rotation.y = yaw + Math.PI;
   group.add(trophy);
@@ -528,15 +536,23 @@ export function buildCourse(scene, physics) {
   // ------------------------------------------------ potions
   const potions = POTIONS.map((p) => {
     const m = potionMesh();
+    m.userData.dynamic = true;
     m.position.set(p.x, p.y + 3.2, p.z);
     group.add(m);
     return { ...p, mesh: m, base: p.y + 3.2 };
   });
 
+  bakeStatic(group);
+
   return {
     group,
     potions,
     finish: { ...fp, yaw },
+    // take it all out of the scene (a new course is built for the next race)
+    dispose() {
+      scene.remove(group);
+      group.traverse((o) => o.geometry?.dispose());
+    },
     setCollected(ids) {
       for (const p of potions) p.mesh.visible = !ids.includes(p.id);
     },
@@ -564,7 +580,7 @@ export function buildCourse(scene, physics) {
       if (flag) strikes.push(lightBeam(group, M, flag.position));
     },
     update(dt, time) {
-      for (const f of flags) f.children[1].rotation.y = Math.sin(time * 3 + f.position.x) * 0.25;
+      for (const f of flags) f.userData.cloth.rotation.y = Math.sin(time * 3 + f.position.x) * 0.25;
       trophy.userData.cup.rotation.y = time * 0.5;
       // rings turn and breathe (grow and shrink)
       for (const r of rings) {
@@ -594,13 +610,17 @@ export function buildCourse(scene, physics) {
         hz.node.updateMatrixWorld(true);
       }
       // box tunnel fans spin, their wind streaks fly across the road away from them
+      // (each streak grows in from the fan and shrinks away at the far side)
       for (const f of windFans) {
         f.rotor.rotation.x = time * 9;
-        for (const s of f.streaks) {
+        f.lines.forEach((s, i) => {
           const u = (time * 0.9 + s.ph) % 1;
-          s.m.position.x = -f.so * (f.span / 2 - u * f.span);
-          s.m.material.opacity = 0.7 * Math.sin(Math.PI * u);
-        }
+          streakTmp.position.set(-f.so * (f.span / 2 - u * f.span), s.y, s.z);
+          streakTmp.scale.set(Math.max(0.01, Math.sin(Math.PI * u)), 1, 1);
+          streakTmp.updateMatrix();
+          f.streaks.setMatrixAt(i, streakTmp.matrix);
+        });
+        f.streaks.instanceMatrix.needsUpdate = true;
       }
       for (const p of pushers) {
         const s = Math.sin(time * p.speed + p.phase) * p.amp;
@@ -667,6 +687,7 @@ function addHazard(group, M, { pos, yaw, boxes, move, reach = 0 }) {
   const node = new THREE.Group();
   node.position.set(pos.x, pos.y, pos.z);
   node.rotation.y = yaw;
+  node.userData.dynamic = !!move;
   for (const m of stripes(boxes, M, false)) node.add(m);
   group.add(node);
   node.updateMatrixWorld(true);
@@ -787,6 +808,44 @@ function cornerWalls(group, physics, seg, at, yaw) {
   }
 }
 
+// Merge every mesh that never moves into a few big meshes, one per material per area, so the course
+// draws in tens of calls instead of thousands. Nothing looks different: each piece is only baked in
+// place. Objects marked userData.dynamic (and everything below them) are left alone, and the areas
+// keep off-screen parts culled.
+const BAKE_CELL = 1500;
+function bakeStatic(group) {
+  group.updateMatrixWorld(true);
+  const batches = new Map();     // material + area -> { mat, geos, cast, receive }
+  const baked = [];
+  const centre = new THREE.Vector3();
+  const visit = (o) => {
+    if (o.userData.dynamic) return;
+    for (const c of o.children.slice()) visit(c);
+    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || !o.visible) return;
+    const pieces = meshPieces(o, o.matrixWorld);
+    if (!pieces) return;
+    for (const { mat, geo } of pieces) {
+      geo.computeBoundingBox();
+      geo.boundingBox.getCenter(centre);
+      const key = `${mat.uuid}|${Math.floor(centre.x / BAKE_CELL)},${Math.floor(centre.z / BAKE_CELL)}`;
+      let b = batches.get(key);
+      if (!b) batches.set(key, (b = { mat, geos: [], cast: false, receive: false }));
+      b.geos.push(geo);
+      b.cast ||= o.castShadow;
+      b.receive ||= o.receiveShadow;
+    }
+    baked.push(o);
+  };
+  visit(group);
+  for (const o of baked) o.removeFromParent();
+  for (const b of batches.values()) {
+    const m = new THREE.Mesh(mergeGeometries(b.geos), b.mat);
+    m.castShadow = b.cast;
+    m.receiveShadow = b.receive;
+    group.add(m);
+  }
+}
+
 // Pink speed ring: tiles turning slowly in a ring standing on the road; driving through it boosts the
 // truck. Returns the ring.
 function checkpointGate(group, physics, seg, M, at, yaw) {
@@ -803,10 +862,12 @@ function checkpointGate(group, physics, seg, M, at, yaw) {
     ring.add(m);
   }
   const holder = new THREE.Group();
+  holder.userData.dynamic = true;
   holder.position.set(c.x, c.y + top, c.z);
   // driving through the ring gives a burst of speed
   physics.addBoost({ x: c.x, z: c.z, w: 18, d: 8, rot: yaw, y: c.y });
   holder.rotation.y = yaw;
+  mergeStatic(ring);   // its tiles in one draw
   holder.add(ring);
   group.add(holder);
   return ring;
@@ -866,14 +927,15 @@ function buildBoxTunnel(group, physics, seg, M, at, yaw) {
     }
     fan.add(rotor);
     node.add(fan);
-    // white streaks of wind blowing across from the fan
-    const streaks = [];
-    for (let s = 0; s < 10; s++) {
-      const m = box(6, 0.25, 0.25, M.windStreak.clone(), { y: 2 + ((s * 7) % 13), z: ((s * 0.37) % 1 - 0.5) * L * 0.9, cast: false, receive: false });
-      node.add(m);
-      streaks.push({ m, ph: s * 0.29 });
-    }
-    fans.push({ rotor, streaks, so, span: seg.w + 12 });
+    mergeStatic(fan, [rotor]);
+    // white streaks of wind blowing across from the fan (one instanced draw)
+    const streaks = new THREE.InstancedMesh(new THREE.BoxGeometry(6, 0.25, 0.25), M.windStreak, 10);
+    streaks.frustumCulled = false;
+    streaks.userData.dynamic = true;
+    node.add(streaks);
+    const lines = Array.from({ length: 10 }, (_, s) => ({ y: 2 + ((s * 7) % 13), z: ((s * 0.37) % 1 - 0.5) * L * 0.9, ph: s * 0.29 }));
+    fan.userData.dynamic = true;
+    fans.push({ rotor, streaks, lines, so, span: seg.w + 12 });
     physics.addWind({ x: c.x, z: c.z, w: seg.w + 10, d: L, rot: yaw, y: c.y, fx: so * seg.dz * WIND, fz: -so * seg.dx * WIND });
   }
   return fans;

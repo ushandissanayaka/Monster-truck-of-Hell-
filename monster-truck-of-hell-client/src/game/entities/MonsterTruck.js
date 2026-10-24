@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { plastic, neon } from '../util/materials.js';
-import { box, cylinder, sphere } from '../util/geometry.js';
+import { box, cylinder, sphere, mergeStatic } from '../util/geometry.js';
 import { truckById } from '../../shared/gameData.js';
 
 export const WHEEL_R = 2.45;
@@ -610,6 +610,9 @@ export class MonsterTruck {
         o.receiveShadow = false;
       }
     });
+    // one draw per material for each part that moves on its own (chassis, body, each wheel and its
+    // spinning hub); the hat slot is filled later, so it is left alone
+    mergeStatic(root, [this.body, ...this.wheels, ...this.wheels.map((w) => w.userData.spin)], [this.hatSlot]);
   }
 
   // where the driver sits (avatar feet), in truck space: head up behind the side glass

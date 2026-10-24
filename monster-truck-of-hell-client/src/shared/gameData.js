@@ -264,9 +264,9 @@ function plates(path) {
   return out;
 }
 
-function buildCourse() {
+function buildCourse(path) {
   let x = 0, z = -WORLD.plazaHalf, y = 0, head = 0, acc = 0;
-  const segs = plates(PATH).map((p, i) => {
+  const segs = plates(path).map((p, i) => {
     head += ((p.turn || 0) * Math.PI) / 180;
     const dx = Math.sin(head), dz = -Math.cos(head);
     y += p.drop || 0;
@@ -290,7 +290,9 @@ function buildCourse() {
   return { segs, length: acc };
 }
 
-export const COURSE = buildCourse();
+// The course of the current race and everything worked out from it (see setCourseVariant below).
+export let COURSE, SPLITS, CATCHES, STAGES, FINISH, POTIONS;
+export let COURSE_VARIANT = -1;
 
 // The two side runs of each split: four plates each, swinging out from the middle line and back in,
 // each starting a step lower than the last, two flat and two cupped. They are extra road pieces built
@@ -330,14 +332,14 @@ function splitRuns(g) {
   void head;
   return runs;
 }
-export const SPLITS = COURSE.segs.filter((g) => g.split === true).map((g) => ({ gap: g, runs: splitRuns(g) }));
+const makeSplits = (course) => course.segs.filter((g) => g.split === true).map((g) => ({ gap: g, runs: splitRuns(g) }));
 
 // A catch under each jump gap: a ledge a little lower that a truck falling short lands on, sloping up
 // to where the next plate starts, so a missed jump costs time instead of a fall into the lava. Built
 // and driven like a course segment (but not on the course line).
 const CATCH_DROP = 8;
-export const CATCHES = COURSE.segs.filter((g) => g.kind === 'gap' && !g.split && !g.plateGap).map((g) => {
-  const prev = COURSE.segs[g.i - 1], next = COURSE.segs[g.i + 1];
+const makeCatches = (course) => course.segs.filter((g) => g.kind === 'gap' && !g.split && !g.plateGap).map((g) => {
+  const prev = course.segs[g.i - 1], next = course.segs[g.i + 1];
   const yb = next ? next.a.y : g.b.y;
   const ya = Math.min(prev ? segTop(prev, 1, 0) : g.a.y, yb) - CATCH_DROP;
   const m = { nx: Math.cos(g.head), nz: Math.sin(g.head), k: 1 };
@@ -346,12 +348,11 @@ export const CATCHES = COURSE.segs.filter((g) => g.kind === 'gap' && !g.split &&
     dx: g.dx, dz: g.dz, head: g.head, a: { x: g.a.x, z: g.a.z, y: ya }, b: { x: g.b.x, z: g.b.z, y: yb }, ma: m, mb: m, start: g.start,
   };
 });
-export const STAGES = STAGE_COLORS.map((color, i) => {
-  const list = COURSE.segs.filter((s) => s.stage === i);
+const makeStages = (course) => STAGE_COLORS.map((color, i) => {
+  const list = course.segs.filter((s) => s.stage === i);
   const first = list[0], last = list[list.length - 1];
   return { i, color, start: first.start, end: last.start + last.len, first: first.i };
 });
-export const FINISH = COURSE.segs[COURSE.segs.length - 1];
 
 // The four corners of a segment's top (a: left/right at the start, b: at the end), mitred.
 export function segCorners(s, inset = 0) {
@@ -463,10 +464,10 @@ export function barProgress(dist) {
 }
 
 // Purple potions along the course (10 per race), at fixed spots.
-export const POTIONS = [0.06, 0.15, 0.24, 0.33, 0.42, 0.52, 0.61, 0.7, 0.8, 0.9].map((f, i) => {
-  const dist = f * COURSE.length;
-  const s = COURSE.segs.find((g) => dist >= g.start && dist < g.start + g.len && g.kind !== 'gap')
-    || COURSE.segs.find((g) => g.start + g.len > dist && g.kind !== 'gap');
+const makePotions = (course) => [0.06, 0.15, 0.24, 0.33, 0.42, 0.52, 0.61, 0.7, 0.8, 0.9].map((f, i) => {
+  const dist = f * course.length;
+  const s = course.segs.find((g) => dist >= g.start && dist < g.start + g.len && g.kind !== 'gap')
+    || course.segs.find((g) => g.start + g.len > dist && g.kind !== 'gap');
   const t = Math.max(0.15, Math.min(0.85, (dist - s.start) / s.len));
   const side = ((i % 3) - 1) * s.w * 0.25;
   return {
@@ -478,6 +479,108 @@ export const POTIONS = [0.06, 0.15, 0.24, 0.33, 0.42, 0.52, 0.61, 0.7, 0.8, 0.9]
 });
 export const POTION_RADIUS = 7;
 
+// ---------------------------------------------------------------- a new course every race
+// There are TRACK_COUNT tracks, taken in turn race after race. They all share the opening stage;
+// after it, stages 1..11 (each kept whole) run in a different order on each track, renumbered by
+// where they now are, with the finish always last. The track comes from the race number
+// (variantOfRace), so the server and every player build the same one. An order whose roads would
+// cross, run over the spawn plaza or drop too low over the lava is skipped for the next one;
+// track 0 is the course as written above.
+const OPENING = PATH.filter((p) => p.stage === 0);
+const FINISH_PIECE = PATH.find((p) => p.finish);
+const BLOCKS = [];
+for (const p of PATH) if (p.stage > 0 && !p.finish) (BLOCKS[p.stage - 1] ||= []).push(p);
+const LOWEST = -650;       // roads stay well above the fall limit
+
+export const TRACK_COUNT = 5;
+export const variantOfRace = (raceId) => (Math.max(1, raceId || 1) - 1) % TRACK_COUNT;
+
+function blockOrder(variant) {
+  const order = BLOCKS.map((_, i) => i);
+  let seed = (variant * 48271 + 12345) % 2147483647;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
+}
+
+function pathFor(order) {
+  const out = [...OPENING];
+  order.forEach((b, k) => { for (const p of BLOCKS[b]) out.push({ ...p, stage: k + 1 }); });
+  out.push({ ...FINISH_PIECE, stage: BLOCKS.length });
+  return out;
+}
+
+// no road too low, none over the plaza, and no two roads (more than a few pieces apart) crossing
+// within 60 of each other's height
+function courseOk(course) {
+  const roads = course.segs.filter((s) => s.kind !== 'gap');
+  if (roads.some((s) => Math.min(s.a.y, s.b.y) < LOWEST)) return false;
+  const CELL = 150, grid = new Map();
+  const cellsOf = (c, add) => {
+    const xs = c.map((p) => p.x), zs = c.map((p) => p.z);
+    const out = [];
+    for (let gx = Math.floor(Math.min(...xs) / CELL); gx <= Math.floor(Math.max(...xs) / CELL); gx++) {
+      for (let gz = Math.floor(Math.min(...zs) / CELL); gz <= Math.floor(Math.max(...zs) / CELL); gz++) out.push(`${gx},${gz}`);
+    }
+    if (add) for (const k of out) (grid.get(k) || grid.set(k, []).get(k)).push(add);
+    return out;
+  };
+  const quads = roads.map((s) => ({ s, c: segCorners(s) }));
+  for (const q of quads) cellsOf(q.c, q);
+  const H = WORLD.plazaHalf + 30;
+  for (const { s } of quads) {
+    for (let t = 0.1; t < 1; t += 0.2) {
+      for (const f of [-0.4, 0, 0.4]) {
+        const x = s.a.x + s.dx * s.len * t - s.dz * f * s.w, z = s.a.z + s.dz * s.len * t + s.dx * f * s.w;
+        if (s.stage > 0 && Math.abs(x) < H && Math.abs(z) < H) return false;
+        const y = segTop(s, t, 0);
+        for (const o of grid.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`) || []) {
+          if (Math.abs(o.s.i - s.i) <= 3 || !insideQuad(o.c, x, z)) continue;
+          if (Math.abs(segTop(o.s, segLocal(o.s, x, z).t, 0) - y) < 60) return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+// Make the course of a variant (a race) the current one: returns true if it changed. Every module
+// reading COURSE, SPLITS, CATCHES, STAGES, FINISH or POTIONS sees it straight away. Built courses are
+// kept, so switching back and forth (a server with rooms in different races) costs nothing.
+const builtCourses = new Map();
+function makeCourseSet(variant) {
+  let course = null;
+  for (let k = 0; k < 60 && !course; k++) {
+    const v = variant === 0 ? -1 : variant * 61 + k;
+    const c = buildCourse(pathFor(v < 0 ? BLOCKS.map((_, i) => i) : blockOrder(v)));
+    if (v < 0 || courseOk(c)) course = c;
+  }
+  course ||= buildCourse(PATH);
+  return {
+    COURSE: course, SPLITS: makeSplits(course), CATCHES: makeCatches(course), STAGES: makeStages(course),
+    FINISH: course.segs[course.segs.length - 1], POTIONS: makePotions(course),
+  };
+}
+export function setCourseVariant(variant) {
+  if (variant === COURSE_VARIANT) return false;
+  let set = builtCourses.get(variant);
+  if (!set) {
+    set = makeCourseSet(variant);
+    builtCourses.set(variant, set);
+    if (builtCourses.size > 8) builtCourses.delete(builtCourses.keys().next().value);
+  }
+  ({ COURSE, SPLITS, CATCHES, STAGES, FINISH, POTIONS } = set);
+  COURSE_VARIANT = variant;
+  return true;
+}
+setCourseVariant(0);
+
+// how far along the course the finish line is
+export const finishDist = () => FINISH.start + FINISH.len * 0.78;
+
 // ---------------------------------------------------------------- trucks
 // style: pickup | cyber | beast | flower. speed: top speed multiplier.
 // how: cash (buy with Cash) | free (claim) | gems (sku) | pack (starter pack) | spin (wheel only)
@@ -487,6 +590,7 @@ export const TRUCKS = [
   { id: 'gold_rush', name: 'Gold Rush', style: 'pickup', body: '#ffd21a', trim: '#1b1b1b', rim: '#1b1b1b', speed: 1.12, how: 'cash', price: 2500 },
   { id: 'green_goblin', name: 'Green Goblin', style: 'pickup', body: '#5ed23a', trim: '#2a2a2a', rim: '#d9ff4a', speed: 1.2, how: 'cash', price: 10000 },
   { id: 'night_shadow', name: 'Night Shadow', style: 'pickup', body: '#2b2340', trim: '#b04cff', rim: '#b04cff', speed: 1.3, how: 'cash', price: 40000 },
+  { id: 'black_gold', name: 'Black Gold', style: 'beast', body: '#141414', trim: '#ffc933', rim: '#ffc933', speed: 1.4, how: 'cash', price: 75000 },
   { id: 'hellfire', name: 'Hellfire', style: 'beast', body: '#e3201b', trim: '#ffb01a', rim: '#ffd21a', speed: 1.35, how: 'pack', price: 0 },
   { id: 'cyber_beast', name: 'Cybertruck', style: 'cyber', body: '#b9bec6', trim: '#2a2d33', rim: '#1fe0ff', speed: 1.4, how: 'gems', sku: 'truck_cyber', label: 'ON SALE' },
   { id: 'jurassic_attack', name: 'Jurassic Attack', style: 'beast', body: '#18b6a0', trim: '#e8ff3a', rim: '#20f0c8', speed: 1.5, how: 'gems', sku: 'truck_jurassic', label: 'ON SALE' },
