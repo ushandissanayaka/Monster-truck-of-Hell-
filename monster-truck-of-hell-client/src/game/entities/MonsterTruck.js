@@ -32,7 +32,7 @@ function cachedGeo(key, make) {
 // ---------------------------------------------------------------- materials
 // A small painted studio environment (bright sky, grey horizon, dark floor with soft boxes) gives
 // the paint, chrome and glass their shine without depending on the scene around them.
-function envMap() {
+export function studioEnv() {
   return cachedGeo('env', () => {
     const c = document.createElement('canvas');
     c.width = 512; c.height = 256;
@@ -60,18 +60,18 @@ function envMap() {
 // glossy clear-coated body paint
 function paintMat(color) {
   return cachedGeo(`paint|${color}`, () => new THREE.MeshPhysicalMaterial({
-    color, roughness: 0.22, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.04, envMap: envMap(), envMapIntensity: 1.0,
+    color, roughness: 0.22, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.04, envMap: studioEnv(), envMapIntensity: 1.0,
   }));
 }
-const chrome = () => cachedGeo('chrome', () => new THREE.MeshStandardMaterial({ color: '#e2e6eb', metalness: 1, roughness: 0.16, envMap: envMap() }));
-const whiteGloss = () => cachedGeo('whiteGloss', () => new THREE.MeshStandardMaterial({ color: '#f7f7f7', roughness: 0.3, envMap: envMap(), envMapIntensity: 0.3 }));
+const chrome = () => cachedGeo('chrome', () => new THREE.MeshStandardMaterial({ color: '#e2e6eb', metalness: 1, roughness: 0.16, envMap: studioEnv() }));
+const whiteGloss = () => cachedGeo('whiteGloss', () => new THREE.MeshStandardMaterial({ color: '#f7f7f7', roughness: 0.3, envMap: studioEnv(), envMapIntensity: 0.3 }));
 const rubber = () => cachedGeo('rubber', () => new THREE.MeshStandardMaterial({ color: '#1d1d20', roughness: 0.92 }));
-const navy = () => cachedGeo('navy', () => new THREE.MeshStandardMaterial({ color: '#25324a', roughness: 0.45, metalness: 0.35, envMap: envMap(), envMapIntensity: 0.4 }));
-const springMat = () => cachedGeo('spring', () => new THREE.MeshStandardMaterial({ color: '#ffd21a', roughness: 0.35, metalness: 0.2, envMap: envMap(), envMapIntensity: 0.5 }));
+const navy = () => cachedGeo('navy', () => new THREE.MeshStandardMaterial({ color: '#25324a', roughness: 0.45, metalness: 0.35, envMap: studioEnv(), envMapIntensity: 0.4 }));
+const springMat = () => cachedGeo('spring', () => new THREE.MeshStandardMaterial({ color: '#ffd21a', roughness: 0.35, metalness: 0.2, envMap: studioEnv(), envMapIntensity: 0.5 }));
 const interior = () => plastic('#2a2a2e', { roughness: 0.85 });
 // dark, see-through tinted glass with reflections
 const glassMat = () => cachedGeo('truckGlass', () => new THREE.MeshStandardMaterial({
-  color: '#0a0c11', roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.58, envMap: envMap(), envMapIntensity: 1.2,
+  color: '#0a0c11', roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.58, envMap: studioEnv(), envMapIntensity: 1.2,
   side: THREE.DoubleSide, depthWrite: false,
 }));
 

@@ -1,5 +1,5 @@
-// The three built-in background songs (played by MusicPlayer when no mp3 is supplied).
-// Soft rock band with a classic touch: drums, bass, rhythm guitar, piano, strings and a lead guitar.
+// The four built-in background songs (played by MusicPlayer when no mp3 is supplied): the fast race
+// song first, then three soft rock songs: drums, bass, rhythm guitar, piano, strings and a lead guitar.
 // Each song has a verse and a chorus progression (chord per bar as a scale degree: 0 = I, 3 = IV,
 // 4 = V, 5 = vi ...) and a written melody for each.
 // Patterns are 16 steps (one bar of 16th notes): x = hit, . = rest.
@@ -8,6 +8,29 @@
 // up), "r:n" = rest. Each bar adds up to 8 eighths.
 
 export const SONGS = [
+  {
+    // the race song: fast and driving, four-on-the-floor kick, sixteenth hats, galloping bass
+    name: 'Hellfire Rush',
+    bpm: 156,
+    root: 62, // D
+    scale: 'minor',
+    verse: [0, 5, 2, 6],   // i VI III VII
+    chorus: [5, 6, 2, 0],  // VI VII III i
+    kick:  'x...x...x...x...',
+    snare: '....x.......x..x',
+    hat:   'xxxxxxxxxxxxxxxx',
+    bass:  'x.xxx.xxx.xxx.xx',
+    mute:  'x.xxx.xxx.xxx.xx',
+    open:  'x.....x.x.....x.',
+    verseTune: [
+      '0:1 2:1 4:1 2:1 4:2 7:2', '5:2 4:1 2:1 4:4', '2:1 4:1 6:1 4:1 6:2 9:2', '7:4 6:2 4:2',
+      '0:1 2:1 4:1 2:1 4:2 7:2', '8:2 7:1 5:1 7:4', '9:1 7:1 6:1 4:1 6:2 4:2', '7:6 r:2',
+    ],
+    chorusTune: [
+      '7:2 9:2 11:2 9:2', '12:4 11:2 9:2', '10:2 9:2 7:2 6:2', '7:4 r:2 7:1 9:1',
+      '11:2 12:2 14:2 12:2', '11:4 9:2 7:2', '9:2 10:2 9:2 6:2', '7:8',
+    ],
+  },
   {
     name: 'Open Road',
     bpm: 124,

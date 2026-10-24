@@ -59,6 +59,7 @@ export const store = createStore({
   raceMul: 1,           // x2 once somebody finished
   racers: [],           // [{ id, progress (bar 0..1), pfp, self, name }]
   potions: [],          // potion ids collected this race
+  potionBank: 0,        // potions saved up to spend on Rewards
   stage: 0,
   finished: false,
   // driving

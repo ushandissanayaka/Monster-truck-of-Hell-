@@ -46,21 +46,6 @@ function useNow(ms = 500) {
 const Img = ({ src, className, style }) => (src ? <img className={className} style={style} src={src} alt="" draggable="false" /> : null);
 
 // ---------------------------------------------------------------- top left
-function MenuPill({ actions }) {
-  return (
-    <div className="menu-pill">
-      <button className="menu-logo" onClick={actions.menu} aria-label="Menu"><span /></button>
-      <div className="menu-bar">
-        <button onClick={actions.menu} aria-label="Menu">
-          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
-        </button>
-        <button onClick={actions.menu} aria-label="Chat">
-          <svg viewBox="0 0 24 24"><path d="M4 5h16v11H11l-4 3v-3H4z" fill="none" stroke="#fff" strokeWidth="2" strokeLinejoin="round" /><path d="M8 9.5h8M8 12.5h5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function LeftHud({ actions }) {
   const cash = useStore((s) => s.cash);
@@ -80,11 +65,10 @@ function LeftHud({ actions }) {
   );
   return (
     <>
-      <MenuPill actions={actions} />
-      <div className="potions">
+      <button className="potions" onClick={() => { audio.click(); openModal('rewards'); }} aria-label="Rewards">
         <Img className="potion-ico" src={iconUrl('potion', 128)} />
         <T size={36} sw={3}>{`${potions}/10`}</T>
-      </div>
+      </button>
       <div className="cash-bar">
         <Img className="cash-ico" src={iconUrl('cash', 128)} />
         <T size={38} sw={3}>{formatShort(cash)}</T>

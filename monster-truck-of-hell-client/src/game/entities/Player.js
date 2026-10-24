@@ -26,6 +26,10 @@ const MU = 1.4;                       // tyre side grip
 const KB = 300, CB = 20;              // body points touching the ground
 const BOOST = 1.7;                     // a speed pad pushes the truck up to this times its top speed
 const LAUNCH = 2.4;                   // throttle punch: a short tap already gives a big push
+const SLOPE_MIN = 0.05;               // off the throttle, gentler slopes than this hold the truck still
+const ROLL_K = 0.6;                   // share of gravity along the slope that rolls a coasting truck
+const ROLL_MAX = 14;                  // a coasting truck rolls down a slope no faster than this
+const DOWNHILL_MAX = 1.4;             // on the throttle down a slope, gravity carries it up to this times top speed
 const CLIMB = 8.5;                    // anything lower than this is driven over, not bumped into
 const SAMPLES = [-0.8, -0.4, 0, 0.4, 0.8];      // along the tyre, as fractions of its radius
 const TREAD_EDGES = [-1.3, 1.3];                 // across the tyre, from its middle
@@ -38,6 +42,11 @@ const BODY_POINTS = [
   [2.6, ROOF_Y + 1.5, -2.15], [-2.6, ROOF_Y + 1.5, -2.15],
   [TRACK + 1.5, WHEEL_R, AXLE], [-TRACK - 1.5, WHEEL_R, AXLE], [TRACK + 1.5, WHEEL_R, -AXLE], [-TRACK - 1.5, WHEEL_R, -AXLE],
   [TRACK, WHEEL_R * 2, AXLE], [-TRACK, WHEEL_R * 2, AXLE], [TRACK, WHEEL_R * 2, -AXLE], [-TRACK, WHEEL_R * 2, -AXLE],
+].map(([x, y, z]) => new THREE.Vector3(x, y, z));
+// points on the truck that can touch a hazard (truck space; the first is the middle)
+const HAZARD_POINTS = [
+  [0, 4, 0], [TRACK + 0.8, WHEEL_R, AXLE], [-TRACK - 0.8, WHEEL_R, AXLE], [TRACK + 0.8, WHEEL_R, -AXLE], [-TRACK - 0.8, WHEEL_R, -AXLE],
+  [3, BELT, 7.2], [-3, BELT, 7.2], [3, BELT, -7.2], [-3, BELT, -7.2], [0, ROOF_Y, -0.5],
 ].map(([x, y, z]) => new THREE.Vector3(x, y, z));
 const v3 = () => new THREE.Vector3();
 const TMP = {
@@ -157,6 +166,13 @@ export class LocalPlayer extends Driver {
     this.place(x, y, z);
   }
 
+  // HAZARD_POINTS in the world, where the truck is now
+  hazardPoints() {
+    const pts = this._hazardPts || (this._hazardPts = HAZARD_POINTS.map(() => new THREE.Vector3()));
+    HAZARD_POINTS.forEach((p, i) => pts[i].copy(p).applyQuaternion(this.q).add(this.body.pos));
+    return pts;
+  }
+
   fireNitro() {
     if (this.nitro > 0 || this.nitroCool > 0) return false;
     this.nitro = this.stats.nitroSeconds;
@@ -170,6 +186,7 @@ export class LocalPlayer extends Driver {
 
   update(dt, input, physics) {
     const move = input.moveVector(true);
+    this.throttle = Math.max(0, move.y);   // for the engine sound
     const jump = input.consumeJump();
     this.drifting = !!input.drift;
 
@@ -213,7 +230,7 @@ export class LocalPlayer extends Driver {
     this.ry = e.y;
     this.pitch = e.x;
     this.roll = e.z;
-    this.fellInLava = this.body.pos.y < WORLD.lavaY + 2;
+    this.fellInLava = this.body.pos.y < WORLD.fallY;
     this.root.position.copy(this.body.pos);
     this.root.quaternion.copy(this.q);
     this.pose(dt, this.speed, this.steer, !this.body.grounded, this.wheelY);
@@ -291,8 +308,17 @@ export class LocalPlayer extends Driver {
         const want = top * (nitro ? 1 : Math.min(1, move.y));
         if (fwd < want) a = st.accel * LAUNCH * (nitro ? 1.6 : 1) * (1 - Math.max(0, fwd) / (want + 8));
         else a = -TRUCK_PHYS.coast;
+        // down a slope gravity pulls on past top speed (so a long drop throws the truck off its kicker)
+        if (Z.y < -SLOPE_MIN && upright && fwd > 0 && fwd < top * DOWNHILL_MAX) a = Math.max(a, -GRAVITY * Z.y * ROLL_K);
       } else if (move.y < -0.1) {
         a = fwd > 0.5 ? -TRUCK_PHYS.brake : (fwd > -TRUCK_PHYS.reverse ? -st.accel * 1.4 : 0);
+      } else if (Math.abs(Z.y) > SLOPE_MIN && upright) {
+        // off the throttle on a slope: slow down going up, stop, then roll back down slowly
+        const down = -Math.sign(Z.y);
+        const rolling = fwd * down;
+        a = -GRAVITY * Z.y * ROLL_K;
+        if (rolling < 0) a -= Math.sign(fwd) * TRUCK_PHYS.coast;
+        else if (rolling > ROLL_MAX) a = -Math.sign(fwd) * Math.min((rolling - ROLL_MAX) / h, TRUCK_PHYS.coast * 2);
       } else if (Math.abs(fwd) > 0.05) {
         a = -Math.sign(fwd) * Math.min(Math.abs(fwd) / h, TRUCK_PHYS.coast);
       }
@@ -304,6 +330,10 @@ export class LocalPlayer extends Driver {
       const D = TMP.d.set(0, WHEEL_R, 0).applyQuaternion(q).add(p);
       apply(D, TMP.f.copy(fh).multiplyScalar(a));
     }
+
+    // ---- a fan's wind pushes the whole truck across the road
+    const wind = physics.windAt(p.x, p.z, p.y);
+    if (wind) force.add(TMP.f.set(wind.fx, 0, wind.fz));
 
     // ---- body points: bumpers, roof, roll bar, wheel sides - stiff, scraping contacts
     let bodyHit = false;

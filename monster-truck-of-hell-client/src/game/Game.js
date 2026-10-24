@@ -12,6 +12,9 @@ import { CameraController } from './systems/CameraController.js';
 import { InteractionSystem } from './systems/InteractionSystem.js';
 import { buildStartingPlace } from './scenes/StartingPlace.js';
 import { LocalPlayer, RemotePlayer } from './entities/Player.js';
+import { createWind } from './entities/Wind.js';
+import { createConfetti } from './entities/Confetti.js';
+import { Autopilot } from './systems/Autopilot.js';
 import { preloadAvatar } from './entities/BloxityAvatar.js';
 import {
   WORLD, RACE, STAGES, FINISH, POTIONS, POTION_RADIUS, WHEEL_SEGMENTS, WHEEL_COOLDOWN_MS, SKIP_SKU, PASSES,
@@ -22,7 +25,7 @@ const SEND_HZ = 15;
 const FINISH_DIST = FINISH.start + FINISH.len * 0.78;
 const ERRORS = {
   no_cash: 'Not enough Cash!', owned: 'You already own this', locked: 'Not unlocked yet', not_yet: 'Not ready yet!',
-  max: 'Already maxed out!', claimed: 'Already claimed', gems: 'Buy it with Gems', no_spins: 'No spins left',
+  max: 'Already maxed out!', claimed: 'Already claimed', gems: 'Buy it with Gems', no_spins: 'No spins left', potions: 'Collect more potions around the map!',
 };
 
 export class Game {
@@ -71,6 +74,12 @@ export class Game {
       hat: s.hat,
     });
     this.scene.add(this.player.root);
+    // wind rushing past after a speed pad / pink ring (rush: seconds left)
+    this.wind = createWind();
+    this.scene.add(this.wind.object);
+    this.rush = 0;
+    this.confetti = createConfetti();
+    this.scene.add(this.confetti.object);
     this.player.respawn();
     this.applyStats();
 
@@ -103,6 +112,8 @@ export class Game {
     bloxity.loadingEnd();
     this.loadPrices();
     bloxity.gameplayStart();
+    // the first window on joining, as in the reference: the Rewards roll
+    setTimeout(() => { const s = store.getState(); if (!s.modal && s.settings?.popup !== false) openModal('rewards'); }, 1500);
   }
 
   // dev only: ?cam=yaw,pitch,distance&pos=x,z&modal=shop to frame screenshots
@@ -123,6 +134,7 @@ export class Game {
       this.debugCam = true;
     }
     if (q.get('drive')) this.input.joy.set(Number(q.get('steer') || 0), 1);
+    if (q.get('autoplay')) this.autopilot = new Autopilot();
     const modal = q.get('modal');
     if (modal) setTimeout(() => openModal(modal, q.get('data')), 500);
   }
@@ -225,11 +237,11 @@ export class Game {
   registerInteractions() {
     const p = this.world.parts;
     const I = this.interaction;
-    I.add({ id: 'wheel', position: p.wheel.position, radius: 32, height: 48, object: 'Daily Wheel', action: 'Open', onTrigger: () => openModal('wheel'), autoOpen: true, modal: 'wheel' });
+    I.add({ id: 'wheel', position: p.wheel.position, radius: 20, height: 48, object: 'Daily Wheel', action: 'Open', onTrigger: () => openModal('wheel'), autoOpen: true, modal: 'wheel' });
     for (const pad of p.pads) {
       const pass = PASSES.find((x) => x.id === pad.id);
       // press E: straight to the Bloxity payment popup for the pass
-      I.add({ id: `pad_${pad.id}`, position: pad.position, radius: 7, height: 12, object: pass.name, action: 'Buy', onTrigger: () => this.actions.purchase(pass.sku) });
+      I.add({ id: `pad_${pad.id}`, position: pad.position, radius: 8.5, height: 18, object: pass.name, action: 'Buy', onTrigger: () => this.actions.purchase(pass.sku) });
     }
     for (const sh of p.shows) {
       const t = truckById(sh.id);
@@ -358,7 +370,7 @@ export class Game {
     store.setState({
       cash: p.cash, xp: p.xp, level: p.level, trucks: p.trucks, truck: p.truck, hats: p.hats, hat: p.hat,
       powers: p.powers, passes: p.passes, boosts: p.boosts, spins: p.spins, lastSpinAt: p.lastSpinAt,
-      starterPack: p.starterPack, playtimeClaimed: p.playtimeClaimed, races: p.races, wins: p.wins,
+      starterPack: p.starterPack, playtimeClaimed: p.playtimeClaimed, races: p.races, wins: p.wins, potionBank: p.potions || 0,
       friendBoost: p.friendBoost || 0, serverOffset: offset,
       joinedAt: p.joinedAt ? p.joinedAt - offset : store.getState().joinedAt,
     });
@@ -398,6 +410,9 @@ export class Game {
       case 'hat':
         if (!r.ok) toast(ERRORS[r.error] || 'Cannot wear that', 'error');
         break;
+      case 'rewards':
+        if (r.ok) { audio.win(); store.setState({ modal: { type: 'unlocked', data: { prizes: r.prizes } } }); } else toast(ERRORS[r.error] || 'Cannot open', 'error');
+        break;
       case 'playtime':
         if (r.ok) { toast('Propeller Cap unlocked!', 'reward'); audio.win(); } else toast(ERRORS[r.error] || 'Keep playing!', 'error');
         break;
@@ -407,7 +422,7 @@ export class Game {
   // ---------------------------------------------------------------- actions (called by the HUD)
   actions = {
     nitro: () => {
-      if (this.player.fireNitro()) { audio.boost(); return true; }
+      if (this.player.fireNitro()) { audio.nitro(); return true; }
       return false;
     },
     jump: () => this.input.jump(),
@@ -432,6 +447,10 @@ export class Game {
     equipHat: (id) => this.serverAction('equipHat', id),
     buyPower: (id) => this.serverAction('buyPower', id),
     claimPlaytime: () => this.serverAction('claimPlaytime'),
+    openRewards: (n) => {
+      if (!this.room) return toast('Rewards need the game server', 'error');
+      this.room.send('rewards', n);
+    },
     skip: () => {
       if (this.player.body.pos.z > -WORLD.plazaHalf && !this.room) return;
       this.actions.purchase(SKIP_SKU);
@@ -488,10 +507,20 @@ export class Game {
     this.input.update();
     const pl = this.player;
     const modalOpen = !!store.getState().modal;
-    pl.update(dt, modalOpen ? NO_INPUT : this.input, this.physics);
+    if (this.autopilot) {
+      const a = this.autopilot.drive(dt, pl, this.world.parts.course);
+      this.input.joy.set(a.x, a.y);
+      if (a.reset || pl.fellInLava) this.autopilot.skipAhead(pl);
+    }
+    pl.update(dt, modalOpen && !this.autopilot ? NO_INPUT : this.input, this.physics);
     if (pl.jumped) { pl.jumped = false; audio.jump(); }
-    if (pl.landed) { pl.landed = false; audio.land?.(); }
-    if (pl.fellInLava) this.onLava();
+    if (pl.landed) { pl.landed = false; audio.land(); }
+    this.airSounds(pl);
+    if (pl.fellInLava) { if (!this.autopilot) this.onLava('lava'); }
+    else if (!this.autopilot && this.world.parts.course.hazardHit(pl.hazardPoints())) {
+      centerText('Smashed! Back to the checkpoint', '#ff4a3a');
+      this.onLava('hazard');
+    }
     if (pl.flipped !== !!this.flipHint) {
       this.flipHint = pl.flipped;
       if (pl.flipped) centerText('Space + A / D (or W / S) to roll it back!');
@@ -504,7 +533,21 @@ export class Game {
     const follow = !this.debugCam && Math.abs(pl.speed) > 2 ? { yaw: pl.ry + Math.PI, strength: 1 } : null;
     this.cam.update(dt, focus, this.input.cameraTurn(true), this.input.cameraPitch(), follow);
 
-    const fov = 70 + (pl.nitro > 0 ? 14 : 0) + Math.min(6, Math.abs(pl.speed) / 12);
+    if (pl.boosted && this.rush < 0.8) audio.nitro();   // a speed pad or a pink ring
+    if (pl.boosted || pl.nitro > 0) this.rush = 1.4;
+    pl.boosted = false;
+    // flying off a jump or falling fast: the wind rushes past too
+    const vel = pl.lin.length();
+    if (pl.airTime > 0.2 && (vel > 30 || pl.lin.y < -20)) this.rush = Math.max(this.rush, 0.6);
+    this.rush = Math.max(0, this.rush - dt);
+    const rushK = Math.min(1, this.rush / 0.6) * Math.min(1, vel / 30);
+    const dir = this._windDir || (this._windDir = new THREE.Vector3());
+    if (vel > 1) dir.copy(pl.lin).divideScalar(vel);
+    else dir.set(Math.sin(pl.ry), 0, Math.cos(pl.ry));
+    this.wind.update(pl.body.pos, dir, vel, rushK);
+    this.confetti.update(dt);
+
+    const fov = 70 + (pl.nitro > 0 ? 14 : rushK * 10) + Math.min(6, Math.abs(pl.speed) / 12);
     if (Math.abs(this.camera.fov - fov) > 0.05) {
       this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 5);
       this.camera.updateProjectionMatrix();
@@ -520,15 +563,25 @@ export class Game {
     this.updateHud(dt);
   }
 
-  // fell into the lava: back to the last stage reached
-  onLava() {
+  // lost the truck (kind: 'lava' fell off, 'hazard' hit a red hazard): back to the last stage reached
+  onLava(kind = 'lava') {
     const pl = this.player;
     if (this.sendingHome) return;
     playTransition('');
+    if (kind === 'hazard') audio.crash();
+    else audio.lavaDeath();
     audio.teleport();
+    this.fallSfx = false;
     const stage = stageAt(this.best);
     if (this.best <= 0) pl.respawn();
     else pl.toCheckpoint(stage);
+  }
+
+  // in the air: a rush when flying off a ramp, a long whistle when falling off the course
+  airSounds(pl) {
+    if (pl.body.grounded) { this.launchSfx = this.fallSfx = false; return; }
+    if (!this.launchSfx && pl.airTime > 0.2 && pl.lin.y > -5 && pl.lin.length() > 30) { this.launchSfx = true; audio.launch(); }
+    if (!this.fallSfx && pl.airTime > 1 && pl.lin.y < -45) { this.fallSfx = true; audio.fallWhistle(); }
   }
 
   // race progress, stages, potions and the finish line (the server checks the same things itself)
@@ -547,7 +600,7 @@ export class Game {
     if (stage !== s.stage) {
       if (stage > s.stage) {
         this.world.parts.course.strike(stage);
-        audio.thunder?.();
+        audio.checkpoint();
         if (!this.room) centerText(`Checkpoint ${stage} reached`, '#c8ff3a');
       }
       store.setState({ stage });
@@ -563,7 +616,7 @@ export class Game {
       }
     }
     if (this.best >= FINISH_DIST && !this.room) {
-      store.setState({ finished: true });
+      store.setState((st) => ({ finished: true, cash: st.cash + RACE.finishCash[0] }));
       this.onVictory({ place: 1, cash: RACE.finishCash[0], xp: RACE.finishXp[0] });
     }
   }
@@ -577,9 +630,10 @@ export class Game {
 
   onVictory(v) {
     store.setState({ finished: true });
+    this.confetti.burst(this.player.body.pos);
     showVictory(v);
     audio.victory();
-    setTimeout(() => this.sendHome('Back to Spawn'), 3500);
+    setTimeout(() => this.sendHome('Back to Spawn'), 3000);   // 3 seconds at the finish with the confetti
   }
 
   onRaceEnded() {
@@ -669,7 +723,7 @@ export class Game {
 
     const moving = Math.abs(pl.speed) > 0.5 && !s.modal;
     const speed01 = THREE.MathUtils.clamp(Math.abs(pl.speed) / Math.max(1, pl.stats.top), 0, 1);
-    audio.engine(true, Math.max(0.05, speed01), moving);
+    audio.engine(true, Math.max(0.05, speed01), moving, pl.throttle || 0);
     audio.wind(moving && speed01 > 0.5, speed01);
   }
 

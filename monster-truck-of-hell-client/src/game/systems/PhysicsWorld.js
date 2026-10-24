@@ -51,6 +51,23 @@ export class PhysicsWorld {
     return false;
   }
 
+  // a fan's wind: a rotated rectangle over the road pushing with (fx, fz) (acceleration)
+  addWind({ x, z, w, d, rot = 0, y = 0, fx, fz }) {
+    const b = { x, z, hx: w / 2, hz: d / 2, cos: Math.cos(rot), sin: Math.sin(rot), y, fx, fz };
+    (this.winds || (this.winds = [])).push(b);
+    return b;
+  }
+
+  // the wind pushing at (x, z) and height y (null if none)
+  windAt(x, z, y) {
+    for (const b of this.winds || []) {
+      if (y < b.y - 4 || y > b.y + 30) continue;
+      const dx = x - b.x, dz = z - b.z;
+      if (Math.abs(dx * b.cos - dz * b.sin) < b.hx && Math.abs(dx * b.sin + dz * b.cos) < b.hz) return b;
+    }
+    return null;
+  }
+
   // block: a barrier - always stops the truck however low it is, and is never driven onto
   addBox({ x, z, w, d, rot = 0, top, bottom = -60, name = '', block = false }) {
     const solid = { type: 'box', x, z, hx: w / 2, hz: d / 2, rot, cos: Math.cos(rot), sin: Math.sin(rot), top, bottom, name, block };

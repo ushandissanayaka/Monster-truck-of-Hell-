@@ -5,7 +5,7 @@ import {
   getProfile, loadProfile, holdProfile, releaseProfile, carryGuestProgress, pendingGrantsFor, claimGrant, markDirty, usesSharedStore,
 } from '../game/profiles.js';
 import {
-  ensureProfile, addCash, addXp, buyTruck, equipTruck, equipHat, buyPower, spinWheel, claimPlaytime, applyGrant, profileMessage,
+  ensureProfile, addCash, addXp, buyTruck, equipTruck, equipHat, buyPower, spinWheel, openRewards, claimPlaytime, applyGrant, profileMessage,
 } from '../game/economy.js';
 import { onGrantRecorded } from '../webhooks/legionWebhook.js';
 import {
@@ -55,6 +55,7 @@ export class StartingPlaceRoom extends Room {
     });
     this.onMessage('potion', (client, id) => this.handlePotion(client, Number(id)));
     this.onMessage('spin', (client) => this.reply(client, 'spin', spinWheel(this.profileOf(client), this.boostOf(client))));
+    this.onMessage('rewards', (client, n) => this.reply(client, 'rewards', openRewards(this.profileOf(client), Number(n), this.boostOf(client))));
     this.onMessage('buyTruck', (client, id) => this.truckResult(client, buyTruck(this.profileOf(client), String(id))));
     this.onMessage('equipTruck', (client, id) => this.truckResult(client, equipTruck(this.profileOf(client), String(id))));
     this.onMessage('equipHat', (client, id) => {

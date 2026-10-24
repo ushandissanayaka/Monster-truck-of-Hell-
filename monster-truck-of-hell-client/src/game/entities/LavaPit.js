@@ -29,7 +29,7 @@ function ridged(x, z) {
   return v;
 }
 
-const CELL = 30;           // grid spacing
+const CELL_MIN = 30;       // finest grid spacing
 const MARGIN = 1400;       // how far the rocks reach past the course
 
 function heightAt(x, z, edge) {
@@ -38,7 +38,7 @@ function heightAt(x, z, edge) {
   const cluster = Math.max(0, noise2(x / 520, z / 520) - 0.3) / 0.7;
   const r = ridged(x / 160, z / 160);
   const spike = Math.pow(Math.max(0, noise2(x / 55 + 3.1, z / 55 - 7.7) - 0.62) / 0.38, 2.2);
-  const h = cluster * (Math.pow(r, 2.4) * 210 + spike * 120) + r * 18;
+  const h = (cluster * (Math.pow(r, 2.4) * 210 + spike * 120) + r * 18) * 0.45;   // low crags: the drop looks deep
   return L - 26 + h * edge;
 }
 
@@ -50,6 +50,8 @@ export function buildLavaPit(scene) {
     z0 = Math.min(z0, s.a.z, s.b.z); z1 = Math.max(z1, s.a.z, s.b.z);
   }
   x0 -= MARGIN; x1 += MARGIN; z0 -= MARGIN; z1 += MARGIN;
+  // coarser cells over a big area, so the mesh stays a sensible size
+  const CELL = Math.max(CELL_MIN, Math.sqrt(((x1 - x0) * (z1 - z0)) / 90000));
   const nx = Math.ceil((x1 - x0) / CELL), nz = Math.ceil((z1 - z0) / CELL);
   const H = new Float32Array((nx + 1) * (nz + 1));
   for (let j = 0; j <= nz; j++) {
@@ -71,7 +73,7 @@ export function buildLavaPit(scene) {
   const vert = (i, j) => {
     const x = x0 + i * CELL, z = z0 + j * CELL, y = H[j * (nx + 1) + i];
     pos.push(x, y, z);
-    const k = Math.min(1, Math.max(0, (y - L) / 160));
+    const k = Math.min(1, Math.max(0, (y - L) / 70));
     tmp.copy(rockLow).lerp(rockHigh, k);
     if (hash2(i * 3.1, j * 7.3) > 0.82) tmp.lerp(rockLit, 0.6);   // mottled red patches
     col.push(tmp.r, tmp.g, tmp.b);
