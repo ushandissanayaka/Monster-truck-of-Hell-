@@ -17,12 +17,11 @@ import { createConfetti } from './entities/Confetti.js';
 import { Autopilot } from './systems/Autopilot.js';
 import { preloadAvatar } from './entities/BloxityAvatar.js';
 import {
-  WORLD, RACE, STAGES, FINISH, POTIONS, POTION_RADIUS, WHEEL_SEGMENTS, WHEEL_COOLDOWN_MS, SKIP_SKU, PASSES,
-  courseLocate, stageAt, barProgress, truckStats, truckById, paidSkus, formatShort,
+  WORLD, RACE, STAGES, POTIONS, POTION_RADIUS, WHEEL_SEGMENTS, WHEEL_COOLDOWN_MS, SKIP_SKU, PASSES,
+  courseLocate, stageAt, barProgress, truckStats, truckById, paidSkus, formatShort, finishDist, setCourseVariant, variantOfRace,
 } from '../shared/gameData.js';
 
 const SEND_HZ = 15;
-const FINISH_DIST = FINISH.start + FINISH.len * 0.78;
 const ERRORS = {
   no_cash: 'Not enough Cash!', owned: 'You already own this', locked: 'Not unlocked yet', not_yet: 'Not ready yet!',
   max: 'Already maxed out!', claimed: 'Already claimed', gems: 'Buy it with Gems', no_spins: 'No spins left', potions: 'Collect more potions around the map!',
@@ -615,10 +614,18 @@ export class Game {
         this.world.parts.course.setCollected([...s.potions, po.id]);
       }
     }
-    if (this.best >= FINISH_DIST && !this.room) {
+    if (this.best >= finishDist() && !this.room) {
       store.setState((st) => ({ finished: true, cash: st.cash + RACE.finishCash[0] }));
       this.onVictory({ place: 1, cash: RACE.finishCash[0], xp: RACE.finishXp[0] });
     }
+  }
+
+  // every race has its own course (the same on the server and every player): build it when it changes
+  useRaceCourse(raceId) {
+    if (!setCourseVariant(variantOfRace(raceId))) return;
+    this.world.rebuildCourse();
+    this.world.parts.course.setCollected(store.getState().potions || []);
+    if (this.autopilot) this.autopilot.far = 0;
   }
 
   onPotion(id, cash) {
@@ -692,12 +699,17 @@ export class Game {
       if (st.raceId !== this.raceId) {
         if (this.raceId != null && phase === 'race') store.setState({ potions: [], finished: false });
         this.raceId = st.raceId;
+        this.useRaceCourse(st.raceId);
       }
     } else {
       const o = this.offline;
       o.left -= step * (o.phase === 'race' ? o.mul : 1);
       if (o.left <= 0) {
-        if (o.phase === 'race') { o.phase = 'ended'; o.left = RACE.endedSeconds; o.mul = 1; this.onRaceEnded(); } else { o.phase = 'race'; o.left = RACE.seconds; }
+        if (o.phase === 'race') { o.phase = 'ended'; o.left = RACE.endedSeconds; o.mul = 1; this.onRaceEnded(); } else {
+          o.phase = 'race'; o.left = RACE.seconds;
+          o.raceId = (o.raceId || 1) + 1;
+          this.useRaceCourse(o.raceId);
+        }
       }
       phase = o.phase; left = o.phase === 'race' ? o.left : RACE.seconds; mul = o.mul;
     }

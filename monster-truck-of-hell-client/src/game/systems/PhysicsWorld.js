@@ -12,6 +12,26 @@ export class PhysicsWorld {
   constructor() {
     this.surfaces = [];
     this.solids = [];
+    this.boosts = [];
+    this.winds = [];
+    this.recording = null;
+  }
+
+  // everything added while `build` runs, so it can be taken out again (the course, rebuilt each race)
+  record(build) {
+    const rec = new Set();
+    this.recording = rec;
+    try { build(); } finally { this.recording = null; }
+    return rec;
+  }
+
+  remove(rec) {
+    for (const key of ['surfaces', 'solids', 'boosts', 'winds']) this[key] = this[key].filter((o) => !rec.has(o));
+  }
+
+  _keep(o) {
+    this.recording?.add(o);
+    return o;
   }
 
   // flat quad (corners [{x,z}] in order) at height `top`, or sloped by height(x, z)
@@ -21,7 +41,7 @@ export class PhysicsWorld {
       s.minX = Math.min(s.minX, c.x); s.maxX = Math.max(s.maxX, c.x);
       s.minZ = Math.min(s.minZ, c.z); s.maxZ = Math.max(s.maxZ, c.z);
     }
-    this.surfaces.push(s);
+    this.surfaces.push(this._keep(s));
     return s;
   }
 
@@ -38,7 +58,7 @@ export class PhysicsWorld {
   // a speed pad: a rotated rectangle on the road
   addBoost({ x, z, w, d, rot = 0, y = 0 }) {
     const b = { x, z, hx: w / 2, hz: d / 2, cos: Math.cos(rot), sin: Math.sin(rot), y };
-    (this.boosts || (this.boosts = [])).push(b);
+    this.boosts.push(this._keep(b));
     return b;
   }
 
@@ -54,7 +74,7 @@ export class PhysicsWorld {
   // a fan's wind: a rotated rectangle over the road pushing with (fx, fz) (acceleration)
   addWind({ x, z, w, d, rot = 0, y = 0, fx, fz }) {
     const b = { x, z, hx: w / 2, hz: d / 2, cos: Math.cos(rot), sin: Math.sin(rot), y, fx, fz };
-    (this.winds || (this.winds = [])).push(b);
+    this.winds.push(this._keep(b));
     return b;
   }
 
@@ -71,13 +91,13 @@ export class PhysicsWorld {
   // block: a barrier - always stops the truck however low it is, and is never driven onto
   addBox({ x, z, w, d, rot = 0, top, bottom = -60, name = '', block = false }) {
     const solid = { type: 'box', x, z, hx: w / 2, hz: d / 2, rot, cos: Math.cos(rot), sin: Math.sin(rot), top, bottom, name, block };
-    this.solids.push(solid);
+    this.solids.push(this._keep(solid));
     return solid;
   }
 
   addCylinder({ x, z, r, top, bottom = -60, name = '' }) {
     const solid = { type: 'cyl', x, z, r, top, bottom, name };
-    this.solids.push(solid);
+    this.solids.push(this._keep(solid));
     return solid;
   }
 

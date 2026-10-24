@@ -9,14 +9,14 @@ import {
 } from '../game/economy.js';
 import { onGrantRecorded } from '../webhooks/legionWebhook.js';
 import {
-  MAX_CLIENTS, WORLD, RACE, STAGES, FINISH, POTIONS, POTION_RADIUS, courseLocate, stageAt, checkpoint, truckStats, TRUCK_PHYS,
+  MAX_CLIENTS, WORLD, RACE, STAGES, POTIONS, POTION_RADIUS, courseLocate, stageAt, checkpoint, truckStats, TRUCK_PHYS,
+  finishDist, setCourseVariant, variantOfRace,
 } from '../shared/gameData.js';
 
 const { Room } = colyseus;
 
 // Players per room; each room's maxClients must equal the hosting seatCap.
 const SEAT_CAP = Number(process.env.SEAT_CAP) || MAX_CLIENTS;
-const FINISH_DIST = FINISH.start + FINISH.len * 0.78;
 const MAX_STEP_AHEAD = 200;     // course progress can only grow this much per update (no teleporting ahead)
 
 export class StartingPlaceRoom extends Room {
@@ -182,6 +182,8 @@ export class StartingPlaceRoom extends Room {
         st.raceLeft = RACE.seconds;
         st.raceMul = 1;
         st.raceId += 1;
+        // a new course for the new race (every player builds the same one from raceId)
+        this.useCourse();
       }
     }
   }
@@ -207,7 +209,13 @@ export class StartingPlaceRoom extends Room {
   }
 
   // ---------------------------------------------------------------- movement + progress
+  // this room's course (rooms can be in different races; all share the course data)
+  useCourse() {
+    setCourseVariant(variantOfRace(this.state.raceId));
+  }
+
   handleMove(client, m) {
+    this.useCourse();
     const s = this.sessions.get(client.sessionId);
     const p = this.state.players.get(client.sessionId);
     if (!s || !p || !m) return;
@@ -251,11 +259,12 @@ export class StartingPlaceRoom extends Room {
       client.send('stage', { stage: s.stage, cash });
       this.sendProfile(client);
     }
-    if (s.best >= FINISH_DIST) this.finish(client, s, p);
+    if (s.best >= finishDist()) this.finish(client, s, p);
   }
 
   // respawning to the plaza or to a checkpoint already reached is fine; anything else is not
   allowedTeleport(s, x, z) {
+    this.useCourse();
     const H = WORLD.plazaHalf;
     if (Math.abs(x) <= H + 5 && Math.abs(z) <= H + 5) return true;
     for (let i = 0; i <= Math.min(STAGES.length - 1, s.stage); i++) {
@@ -282,6 +291,7 @@ export class StartingPlaceRoom extends Room {
   }
 
   handlePotion(client, id) {
+    this.useCourse();
     const s = this.sessions.get(client.sessionId);
     const po = POTIONS[id];
     if (!s || !po || !s.last || this.state.racePhase !== 'race' || s.potions.has(id)) return;
@@ -319,6 +329,7 @@ export class StartingPlaceRoom extends Room {
   }
 
   skipStage(sessionId) {
+    this.useCourse();
     const s = this.sessions.get(sessionId);
     const client = this.clients.find((c) => c.sessionId === sessionId);
     if (!s || !client) return;

@@ -22,7 +22,7 @@ export function createEnvironment(scene, renderer, quality = 'High') {
   lava.position.y = WORLD.lavaY;
   scene.add(lava);
   // the jagged rocks standing in the lava under the course
-  buildLavaPit(scene);
+  let pit = buildLavaPit(scene);
 
   // lights: neutral daylight on the grey studs (as in the reference) with a warm sun and a red bounce
   scene.add(new THREE.HemisphereLight('#fff1e8', '#a03020', 1.25));
@@ -40,6 +40,12 @@ export function createEnvironment(scene, renderer, quality = 'High') {
   const offset = sun.position.clone();
 
   return {
+    // the rocks follow the course: rebuilt with it each race
+    rebuildPit() {
+      scene.remove(pit);
+      pit.geometry.dispose();
+      pit = buildLavaPit(scene);
+    },
     update(dt, time, camera, focus) {
       sky.position.copy(camera.position);
       lava.position.x = Math.round(camera.position.x / 100) * 100;
